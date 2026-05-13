@@ -434,7 +434,7 @@ def plot_runout_breakdown(
     """
     import matplotlib.pyplot as plt
 
-    NAVY = "#0d1b2a"; TEAL="#00b4d8"; CORAL="#e63946"; GOLD="#ffd166"
+    NAVY = "white"; TEAL="#00b4d8"; CORAL="#e63946"; GOLD="#ffd166"
     MINT="#06d6a0"; PURPLE="#7400b8"; PINK="#f72585"; GRAY="#8d99ae"
     colours = [TEAL, MINT, GOLD, CORAL, PINK, PURPLE, GRAY]
 
@@ -445,38 +445,38 @@ def plot_runout_breakdown(
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5),
                                     facecolor=NAVY, gridspec_kw={"width_ratios":[2,1]})
-    fig.suptitle("Spindle Nose TIR — 6-Source Breakdown", color="white",
+    fig.suptitle("Spindle Nose TIR — 6-Source Breakdown", color="black",
                  fontsize=12, y=1.02)
 
     # Left: stacked bar
     left = 0.0
     for val, col, lbl in zip(values, colours, names):
         ax1.barh(["TIR Sources"], [val], left=left, color=col,
-                 edgecolor=NAVY, linewidth=0.5, label=f"{lbl}: {val:.2f} μm")
+                 edgecolor="lightgray", linewidth=0.5, label=f"{lbl}: {val:.2f} μm")
         if val > 0.3:
             ax1.text(left + val/2, 0, f"{val:.2f}", ha="center", va="center",
-                     fontsize=7.5, color="white", fontweight="bold")
+                     fontsize=7.5, color="black", fontweight="bold")
         left += val
 
     ax1.axvline(bd.TIR_rss_um,    color=GOLD,  linestyle="--", lw=1.5,
                 label=f"RSS  = {bd.TIR_rss_um:.2f} μm")
     ax1.axvline(bd.TIR_linear_um, color=CORAL, linestyle=":",  lw=1.5,
                 label=f"Linear = {bd.TIR_linear_um:.2f} μm")
-    ax1.set_facecolor("#112233"); ax1.set_xlabel("TIR contribution [μm]", color="white")
-    ax1.tick_params(colors="white"); ax1.legend(fontsize=7.5, loc="lower right")
+    ax1.set_facecolor("white"); ax1.set_xlabel("TIR contribution [μm]", color="black")
+    ax1.tick_params(colors="black"); ax1.legend(fontsize=7.5, loc="lower right")
 
     # Right: pie of % variance contribution (RSS basis)
     pcts = [(v**2 / max(bd.TIR_rss_um**2, 1e-12))*100 for v in values]
     wedges, texts, autotexts = ax2.pie(
         pcts, labels=names, colors=colours,
         autopct=lambda p: f"{p:.0f}%" if p > 3 else "",
-        textprops={"fontsize": 7, "color": "white"},
-        wedgeprops={"edgecolor": NAVY, "linewidth": 0.6},
+        textprops={"fontsize": 7, "color": "black"},
+        wedgeprops={"edgecolor": "lightgray", "linewidth": 0.6},
     )
     for at in autotexts:
-        at.set_color("white"); at.set_fontsize(7)
+        at.set_color("black"); at.set_fontsize(7)
     ax2.set_facecolor(NAVY)
-    ax2.set_title("Variance share (RSS basis)", color="white", fontsize=9)
+    ax2.set_title("Variance share (RSS basis)", color="black", fontsize=9)
 
     plt.tight_layout()
     fig.savefig(save_path, dpi=150, bbox_inches="tight", facecolor=NAVY)
@@ -500,7 +500,7 @@ def plot_runout_vs_speed(
     """
     import matplotlib.pyplot as plt
 
-    NAVY="#0d1b2a"; TEAL="#00b4d8"; CORAL="#e63946"; GOLD="#ffd166"; GRAY="#8d99ae"
+    NAVY="white"; TEAL="#00b4d8"; CORAL="#e63946"; GOLD="#ffd166"; GRAY="#8d99ae"
     if speeds is None:
         speeds = np.linspace(500, 6000, 60).tolist()
 
@@ -513,7 +513,7 @@ def plot_runout_vs_speed(
         tir_geom.append(bd.TIR_geometric_um)
 
     fig, ax = plt.subplots(figsize=(10, 5), facecolor=NAVY)
-    ax.set_facecolor("#112233")
+    ax.set_facecolor("white")
     ax.plot(speeds, tir_total,   color=TEAL,  lw=2,   label="Total TIR (RSS, with ANSYS)")
     ax.plot(speeds, tir_geom,    color=GOLD,  lw=1.5, linestyle="--", label="Geometric TIR (pre-FEA)")
     ax.fill_between(speeds, tir_thermal, 0, alpha=0.25, color=CORAL, label="Thermal contribution")
@@ -522,11 +522,11 @@ def plot_runout_vs_speed(
     ax.axvline(4000, color=GRAY, lw=0.8, linestyle="--", alpha=0.7, label="Nominal 4,000 RPM")
     ax.axvline(6000, color=GRAY, lw=0.6, linestyle=":",  alpha=0.6, label="Max 6,000 RPM")
 
-    ax.set_xlabel("Operating speed [RPM]", color="white")
-    ax.set_ylabel("TIR at spindle nose [μm]", color="white")
+    ax.set_xlabel("Operating speed [RPM]", color="black")
+    ax.set_ylabel("TIR at spindle nose [μm]", color="black")
     ax.set_title("Fig 2 — Spindle Nose TIR vs. Speed\n(ISO 230-3 thermal model + analytical sources)",
-                 color="white")
-    ax.tick_params(colors="white")
+                 color="black")
+    ax.tick_params(colors="black")
     ax.legend(fontsize=8, loc="upper left")
     ax.set_xlim(min(speeds), max(speeds))
     ax.grid(True, alpha=0.3, color=GRAY)
@@ -554,7 +554,7 @@ def plot_tir_sensitivity(
     """
     import matplotlib.pyplot as plt
 
-    NAVY="#0d1b2a"; TEAL="#00b4d8"; CORAL="#e63946"; GOLD="#ffd166"; GRAY="#8d99ae"
+    NAVY="white"; TEAL="#00b4d8"; CORAL="#e63946"; GOLD="#ffd166"; GRAY="#8d99ae"
 
     bd_nom = analyser.analyse(var_dict, z_front, z_rear,
                               delta_nose_ansys_um=delta_nose, Fr_N=Fr_N, n_rpm=n_rpm)
@@ -628,18 +628,18 @@ def plot_tir_sensitivity(
     d_lo   = [deltas_lo[i] for i in order]
 
     fig, ax = plt.subplots(figsize=(10, 6), facecolor=NAVY)
-    ax.set_facecolor("#112233")
+    ax.set_facecolor("white")
     y_pos = np.arange(len(labels))
     ax.barh(y_pos, d_hi, color=TEAL,  alpha=0.85, label="+perturbation", height=0.4,
-            left=0, edgecolor=NAVY, linewidth=0.4)
+            left=0, edgecolor="lightgray", linewidth=0.4)
     ax.barh(y_pos, d_lo, color=CORAL, alpha=0.85, label="−perturbation", height=0.4,
-            left=0, edgecolor=NAVY, linewidth=0.4)
-    ax.axvline(0, color="white", lw=0.8)
-    ax.set_yticks(y_pos); ax.set_yticklabels(labels, fontsize=9, color="white")
-    ax.set_xlabel("ΔTIR (RSS) from nominal [μm]", color="white")
+            left=0, edgecolor="lightgray", linewidth=0.4)
+    ax.axvline(0, color="black", lw=0.8)
+    ax.set_yticks(y_pos); ax.set_yticklabels(labels, fontsize=9, color="black")
+    ax.set_xlabel("ΔTIR (RSS) from nominal [μm]", color="black")
     ax.set_title(f"Fig 3 — TIR Sensitivity Tornado  (nominal TIR = {nom_tir:.2f} μm)",
-                 color="white")
-    ax.tick_params(colors="white")
+                 color="black")
+    ax.tick_params(colors="black")
     ax.legend(fontsize=8)
     ax.grid(axis="x", alpha=0.3, color=GRAY)
 

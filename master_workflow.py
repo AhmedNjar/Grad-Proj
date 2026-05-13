@@ -54,7 +54,7 @@
         • "ml_only": Train ML from existing FEA results
         • "opt_only": Run optimization with pre-trained surrogate
 
-  Author: Manus AI
+  Author: Njar
   Date: April 2026
 ================================================================================
 """

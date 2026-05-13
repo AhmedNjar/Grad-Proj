@@ -492,15 +492,15 @@ def plot_bearing_performance(
     import matplotlib.pyplot as plt
     import os
 
-    NAVY="#0d1b2a"; TEAL="#00b4d8"; CORAL="#e63946"
+    NAVY="white"; TEAL="#00b4d8"; CORAL="#e63946"
     GOLD="#ffd166"; GRAY="#8d99ae"; MINT="#06d6a0"
     os.makedirs(save_dir, exist_ok=True)
 
     plt.rcParams.update({
-        "figure.facecolor": NAVY, "axes.facecolor": "#112233",
-        "axes.edgecolor": GRAY, "axes.labelcolor": "white",
-        "xtick.color": GRAY, "ytick.color": GRAY,
-        "text.color": "white", "grid.color": "#2d4060",
+        "figure.facecolor": NAVY, "axes.facecolor": "white",
+        "axes.edgecolor": "lightgray", "axes.labelcolor": "black",
+        "xtick.color": "black", "ytick.color": "black",
+        "text.color": "black", "grid.color": "#e0e0e0",
         "grid.alpha": 0.5, "font.size": 9,
     })
 
@@ -514,7 +514,7 @@ def plot_bearing_performance(
         l10_vals.append(s.L10_system_hours)
 
     fig, ax = plt.subplots(figsize=(9, 5), facecolor=NAVY)
-    ax.set_facecolor("#112233")
+    ax.set_facecolor("white")
     ax.plot(speeds, [v/1000 for v in l10_vals], color=TEAL, lw=2, marker="o", ms=5)
     ax.axhline(calc.l10_target/1000, color=GOLD, lw=1.5, linestyle="--",
                label=f"Target L10 = {calc.l10_target/1000:.0f} kh")
@@ -540,16 +540,16 @@ def plot_bearing_performance(
 
     x_pos = np.arange(len(st_labels))
     fig, ax = plt.subplots(figsize=(8, 5), facecolor=NAVY)
-    ax.set_facecolor("#112233")
+    ax.set_facecolor("white")
     bars_r = ax.bar(x_pos - 0.2, kr_vals, 0.35, label="K_radial [N/μm]",
-                    color=TEAL, edgecolor=NAVY, linewidth=0.5)
+                    color=TEAL, edgecolor="lightgray", linewidth=0.5)
     bars_a = ax.bar(x_pos + 0.2, ka_vals, 0.35, label="K_axial [N/μm]",
-                    color=CORAL, edgecolor=NAVY, linewidth=0.5)
+                    color=CORAL, edgecolor="lightgray", linewidth=0.5)
     for bar in list(bars_r) + list(bars_a):
         h = bar.get_height()
         if h > 0.5:
             ax.text(bar.get_x() + bar.get_width()/2, h + 0.5, f"{h:.0f}",
-                    ha="center", va="bottom", fontsize=8, color="white")
+                    ha="center", va="bottom", fontsize=8, color="black")
     ax.set_xticks(x_pos); ax.set_xticklabels(st_labels, fontsize=9)
     ax.set_ylabel("Stiffness [N/μm]")
     ax.set_title("Fig 08b — Bearing Pair Stiffness per Station @ 4,000 RPM", pad=10)
@@ -571,8 +571,8 @@ def plot_bearing_performance(
     colours_c = [CORAL if gi > 0 else TEAL for gi in g_arr]
 
     fig, ax = plt.subplots(figsize=(10, 5), facecolor=NAVY)
-    ax.set_facecolor("#112233")
-    ax.barh(c_names, g_arr, color=colours_c, edgecolor=NAVY, linewidth=0.4)
+    ax.set_facecolor("white")
+    ax.barh(c_names, g_arr, color=colours_c, edgecolor="lightgray", linewidth=0.4)
     ax.axvline(0, color=GOLD, lw=1.5, linestyle="--")
     ax.set_xlabel("Constraint value g  (g ≤ 0 = satisfied)")
     ax.set_title("Fig 08c — Bearing Constraint Values @ 4,000 RPM  (g ≤ 0 = ✅)", pad=10)

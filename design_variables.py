@@ -500,16 +500,16 @@ def plot_design_space(ds: DesignSpace, save_dir: str = ".") -> List:
 
     os.makedirs(save_dir, exist_ok=True)
 
-    NAVY  = "#0d1b2a"
+    NAVY  = "white"
     TEAL  = "#00b4d8"
     CORAL = "#e63946"
     GOLD  = "#ffd166"
     GRAY  = "#8d99ae"
     plt.rcParams.update({
-        "figure.facecolor": NAVY, "axes.facecolor": "#112233",
-        "axes.edgecolor": GRAY, "axes.labelcolor": "white",
-        "xtick.color": GRAY, "ytick.color": GRAY,
-        "text.color": "white", "grid.color": "#2d4060",
+        "figure.facecolor": NAVY, "axes.facecolor": "white",
+        "axes.edgecolor": "lightgray", "axes.labelcolor": "black",
+        "xtick.color": "black", "ytick.color": "black",
+        "text.color": "black", "grid.color": "#e0e0e0",
         "grid.alpha": 0.5, "font.size": 9,
     })
 
@@ -567,7 +567,7 @@ def plot_design_space(ds: DesignSpace, save_dir: str = ".") -> List:
     fig3, axes = plt.subplots(2, 3, figsize=(13, 8))
     fig3.patch.set_facecolor(NAVY)
     fig3.suptitle("Fig 3 — Manufacturing Variation Cloud (500 MC samples, geometric vars)",
-                  color="white", y=1.01)
+                  color="black", y=1.01)
     pairs = [(0,1),(0,2),(0,3),(1,2),(1,3),(2,3)]
     for ax, (i, j) in zip(axes.flat, pairs):
         xi = X_mc[:, geom_idx[i]]; xj = X_mc[:, geom_idx[j]]

@@ -804,7 +804,7 @@ class SpindleSimulation:
         """Launch the MAPDL instance."""
         from ansys.mapdl.core import launch_mapdl
         log.info("Launching ANSYS MAPDL ...")
-        self.mapdl = launch_mapdl(timeout=300)
+        self.mapdl = launch_mapdl(timeout=300,override=True,loglevel="ERROR")
         self.mapdl.clear()
         log.info("MAPDL ready (version: %s).", self.mapdl.version)
 
