@@ -331,10 +331,131 @@ class InverseDesignEngine:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# PLOTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_inverse_design(
+    engine:       "InverseDesignEngine",
+    target:       Dict[str, float],
+    forward_surr: Optional[object] = None,
+    save_dir:     str = ".",
+) -> None:
+    """
+    Three inverse-design diagnostic plots.
+
+    Fig 06a — Target vs. predicted performance (validation bar chart)
+    Fig 06b — Predicted design vector: normalised position in bounds
+    Fig 06c — Prediction error: per-output (actual − predicted) if forward surrogate available
+    """
+    import matplotlib.pyplot as plt
+    import os
+
+    NAVY="#0d1b2a"; TEAL="#00b4d8"; CORAL="#e63946"; GOLD="#ffd166"
+    MINT="#06d6a0"; GRAY="#8d99ae"
+    os.makedirs(save_dir, exist_ok=True)
+    plt.rcParams.update({
+        "figure.facecolor": NAVY, "axes.facecolor": "#112233",
+        "axes.edgecolor": GRAY, "axes.labelcolor": "white",
+        "xtick.color": GRAY, "ytick.color": GRAY,
+        "text.color": "white", "grid.color": "#2d4060",
+        "grid.alpha": 0.4, "font.size": 9,
+    })
+
+    ds     = engine.design_space
+    x_pred = engine.predict_design(target)
+    names  = ds.get_variable_names()
+    bounds = ds.get_bounds()
+    tgt_names  = list(target.keys())
+    tgt_values = list(target.values())
+
+    # ── Fig 06a: Target vs forward-predicted performance ─────────────
+    fig, ax = plt.subplots(figsize=(9, 5), facecolor=NAVY)
+    ax.set_facecolor("#112233")
+
+    # If forward surrogate provided, get achieved performance
+    achieved = []
+    if forward_surr is not None:
+        try:
+            y_fwd = forward_surr.predict(x_pred.reshape(1, -1))[0]
+            for tname in tgt_names:
+                idx_o = forward_surr.output_names.index(tname) \
+                        if tname in forward_surr.output_names else None
+                achieved.append(float(y_fwd[idx_o]) if idx_o is not None else None)
+        except Exception:
+            achieved = [None] * len(tgt_names)
+    else:
+        achieved = [None] * len(tgt_names)
+
+    x_pos  = np.arange(len(tgt_names))
+    ax.bar(x_pos - 0.18, tgt_values, 0.32, color=TEAL, edgecolor=NAVY,
+           linewidth=0.5, label="Target")
+    if any(v is not None for v in achieved):
+        achv_vals = [v if v is not None else 0 for v in achieved]
+        ax.bar(x_pos + 0.18, achv_vals, 0.32, color=GOLD, edgecolor=NAVY,
+               linewidth=0.5, label="Achieved (fwd surrogate)")
+        for i, (t, a) in enumerate(zip(tgt_values, achv_vals)):
+            err_pct = abs(a - t) / max(abs(t), 1e-12) * 100
+            ax.text(i, max(t, a) + max(tgt_values) * 0.02,
+                    f"{err_pct:.1f}%", ha="center", fontsize=8, color="white")
+    ax.set_xticks(x_pos); ax.set_xticklabels(tgt_names, fontsize=9)
+    ax.set_ylabel("Performance value"); ax.set_title("Fig 06a — Inverse Design Validation", pad=8)
+    ax.legend(fontsize=8); ax.grid(axis="y", alpha=0.3)
+    plt.tight_layout()
+    p = os.path.join(save_dir, "06a_inverse_validation.png")
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+    plt.close(fig); print(f"  Saved → {p}")
+
+    # ── Fig 06b: Predicted design variables (normalised in bounds) ────
+    fig, ax = plt.subplots(figsize=(13, 6), facecolor=NAVY)
+    ax.set_facecolor("#112233")
+    x_norm = (x_pred - bounds[:, 0]) / (bounds[:, 1] - bounds[:, 0])
+    nom_x  = ds.get_nominal()
+    nom_norm = (nom_x - bounds[:, 0]) / (bounds[:, 1] - bounds[:, 0])
+    y_pos  = np.arange(len(names))
+    ax.barh(y_pos, x_norm, color=CORAL, alpha=0.8, height=0.5,
+            edgecolor=NAVY, linewidth=0.4, label="Inverse predicted")
+    ax.scatter(nom_norm, y_pos, s=25, c=GOLD, zorder=5,
+               marker="|", linewidths=1.5, label="Nominal baseline")
+    ax.set_yticks(y_pos); ax.set_yticklabels(names, fontsize=7.5)
+    ax.set_xlabel("Normalised position in bounds  [0=lower, 1=upper]")
+    ax.set_title("Fig 06b — Inverse Design: Predicted Variables (gold = nominal)", pad=8)
+    ax.axvline(0.5, color=GRAY, lw=0.8, linestyle="--", alpha=0.5)
+    ax.set_xlim(0, 1); ax.legend(fontsize=8, loc="lower right")
+    ax.grid(axis="x", alpha=0.3)
+    plt.tight_layout()
+    p = os.path.join(save_dir, "06b_inverse_design_vars.png")
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+    plt.close(fig); print(f"  Saved → {p}")
+
+    # ── Fig 06c: Error per performance target ─────────────────────────
+    fig, ax = plt.subplots(figsize=(7, 4), facecolor=NAVY)
+    ax.set_facecolor("#112233")
+    if any(v is not None for v in achieved):
+        errs = [(a - t) / max(abs(t), 1e-12) * 100 if a is not None else 0
+                for a, t in zip(achieved, tgt_values)]
+        colours_e = [TEAL if abs(e) < 10 else CORAL for e in errs]
+        ax.bar(tgt_names, errs, color=colours_e, edgecolor=NAVY, linewidth=0.5)
+        ax.axhline(0,  color="white", lw=1.0)
+        ax.axhline(+10, color=GOLD, lw=1.0, linestyle="--", alpha=0.7)
+        ax.axhline(-10, color=GOLD, lw=1.0, linestyle="--", alpha=0.7, label="±10% limit")
+        ax.set_ylabel("Relative error  [%]")
+        ax.set_title("Fig 06c — Inverse Design Prediction Error per KPI", pad=8)
+        ax.legend(fontsize=8); ax.grid(axis="y", alpha=0.3)
+    else:
+        ax.text(0.5, 0.5, "Forward surrogate not provided\n(pass forward_surr= for error plot)",
+                ha="center", va="center", color=GRAY, fontsize=10, transform=ax.transAxes)
+        ax.set_title("Fig 06c — Prediction Error (surrogate required)", pad=8)
+    plt.tight_layout()
+    p = os.path.join(save_dir, "06c_inverse_error.png")
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+    plt.close(fig); print(f"  Saved → {p}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Smoke test
 # ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    import sys; sys.path.insert(0, ".")
+    import sys, os; sys.path.insert(0, ".")
     from design_variables import DesignSpace
 
     np.random.seed(42)
@@ -347,8 +468,7 @@ if __name__ == "__main__":
 
     print("\n🔮 Inverse Design Engine v2 — smoke test\n")
     engine = InverseDesignEngine(ds, use_tensorflow=False)
-    m      = engine.train(X_design, y_perf, performance_names=names,
-                          verbose=False)
+    m      = engine.train(X_design, y_perf, performance_names=names, verbose=False)
     print(f"val_R² = {m['val_r2']:.4f}")
 
     target = {"deflection_um": 8.0, "stress_MPa": 350.0, "frequency_Hz": 800.0}
@@ -359,3 +479,8 @@ if __name__ == "__main__":
     eng2 = InverseDesignEngine.load("/tmp/inv_v2.pkl", ds)
     assert np.allclose(eng2.predict_design(target), x_pred)
     print("✅ Round-trip OK — BUG-10 fixed")
+
+    os.makedirs("/tmp/spindle_plots", exist_ok=True)
+    print("\nGenerating inverse design plots...")
+    plot_inverse_design(engine, target, save_dir="/tmp/spindle_plots")
+    print("✅ Inverse Design v2 OK")

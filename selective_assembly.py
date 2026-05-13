@@ -239,7 +239,10 @@ class SpindleCostModel:
         Empirical fit from NSK/SKF catalogue data:
           cost ≈ C_base × (K / K_ref)^0.6
         """
-        K = var_dict["K_radial"]
+        # K_radial no longer in design vector (removed in v4) — derive from catalog
+        from design_variables import snap_to_skf_bearing
+        brg_front, _, _ = snap_to_skf_bearing(var_dict["R2"], "ACBB", 4000.0, "grease")
+        K = brg_front.radial_stiffness_single_N_mm * 1.7   # DB pair
         cost_per_pair = (
             self.p.bearing_base_cost_usd
             * (K / self.p.bearing_stiffness_ref) ** self.p.bearing_stiffness_exp
@@ -479,7 +482,13 @@ class SelectiveAssemblyAnalyser:
         # In a DB pair, preload Δ = L_inner − L_outer.  The flange section
         # length L3 proxies the spacer length.
         spacer_len  = var_dict["L3"]
-        target_delta_mm = var_dict["K_axial"] * 1e-5   # very small preload gap
+        # K_axial derived from catalog (removed from design vector in v4)
+        from design_variables import snap_to_skf_bearing
+        import math as _math
+        _brg, _, _ = snap_to_skf_bearing(var_dict["R2"], "ACBB", 4000.0, "grease")
+        _alpha = _math.radians(_brg.contact_angle_deg)
+        K_axial_catalog = 1.7 * _brg.radial_stiffness_single_N_mm * _math.tan(_alpha)**2
+        target_delta_mm = K_axial_catalog * 1e-5   # very small preload gap
 
         iface2 = MatingInterface(
             shaft_dim   = spacer_len,
@@ -532,28 +541,181 @@ class SelectiveAssemblyAnalyser:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# PLOTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_selective_assembly(
+    sa_results:  list,
+    costs:       Dict[str, float],
+    var_dict:    Dict[str, float],
+    n_bins_list: Optional[List[int]] = None,
+    analyser:    Optional["SelectiveAssemblyAnalyser"] = None,
+    save_dir:    str = ".",
+) -> None:
+    """
+    Three SA analysis plots.
+
+    Fig 07a — Gap distribution before/after SA for each interface
+    Fig 07b — Cost breakdown pie + bar comparison across n_bins
+    Fig 07c — Improvement ratio and yield % vs. n_bins
+    """
+    import matplotlib.pyplot as plt
+    import os
+
+    NAVY="#0d1b2a"; TEAL="#00b4d8"; CORAL="#e63946"; GOLD="#ffd166"
+    MINT="#06d6a0"; GRAY="#8d99ae"; PURPLE="#7400b8"
+    os.makedirs(save_dir, exist_ok=True)
+    plt.rcParams.update({
+        "figure.facecolor": NAVY, "axes.facecolor": "#112233",
+        "axes.edgecolor": GRAY, "axes.labelcolor": "white",
+        "xtick.color": GRAY, "ytick.color": GRAY,
+        "text.color": "white", "grid.color": "#2d4060",
+        "grid.alpha": 0.4, "font.size": 9,
+    })
+    if n_bins_list is None:
+        n_bins_list = [3, 5, 7, 10]
+
+    SEG_COLS = [TEAL, CORAL, GOLD]
+
+    # ── Fig 07a: Gap distributions before/after SA ────────────────────
+    n_intf = len(sa_results)
+    fig, axes = plt.subplots(n_intf, 2, figsize=(12, 4 * n_intf), facecolor=NAVY)
+    if n_intf == 1:
+        axes = [axes]
+    fig.suptitle("Fig 07a — Gap Distributions Before/After Selective Assembly",
+                 color="white", y=1.01)
+    for row_axes, res, col in zip(axes, sa_results, SEG_COLS):
+        ax_before, ax_after = row_axes[0], row_axes[1]
+        for ax in (ax_before, ax_after):
+            ax.set_facecolor("#112233")
+        σ_before = res.std_gap_no_sa_um
+        σ_after  = res.std_gap_um
+        μ        = res.mean_gap_um
+        x_no_sa  = np.random.normal(μ, σ_before, 500)
+        x_sa     = np.random.normal(μ, σ_after,  500)
+        ax_before.hist(x_no_sa, bins=30, color=CORAL, alpha=0.8, edgecolor=NAVY, lw=0.3)
+        ax_before.axvline(μ - 3*σ_before, color=GOLD, lw=1, linestyle="--")
+        ax_before.axvline(μ + 3*σ_before, color=GOLD, lw=1, linestyle="--",
+                          label=f"±3σ = {σ_before:.1f} μm")
+        ax_before.set_title(f"{res.interface_name}\nBefore SA  σ={σ_before:.1f} μm", fontsize=8)
+        ax_before.legend(fontsize=7.5)
+
+        ax_after.hist(x_sa, bins=30, color=col, alpha=0.8, edgecolor=NAVY, lw=0.3)
+        ax_after.axvline(μ - 3*σ_after, color=GOLD, lw=1, linestyle="--")
+        ax_after.axvline(μ + 3*σ_after, color=GOLD, lw=1, linestyle="--",
+                         label=f"±3σ = {σ_after:.1f} μm")
+        ax_after.set_title(f"After SA ({res.n_bins} bins)\nImproved ×{res.improvement_ratio:.1f}",
+                           fontsize=8)
+        ax_after.legend(fontsize=7.5)
+        for ax in (ax_before, ax_after):
+            ax.set_xlabel("Gap [μm]"); ax.set_ylabel("Count")
+    plt.tight_layout()
+    p = os.path.join(save_dir, "07a_sa_gap_distribution.png")
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+    plt.close(fig); print(f"  Saved → {p}")
+
+    # ── Fig 07b: Cost breakdown ───────────────────────────────────────
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5), facecolor=NAVY)
+    for ax in (ax1, ax2):
+        ax.set_facecolor("#112233")
+    fig.suptitle("Fig 07b — Cost Breakdown", color="white")
+
+    cost_keys = ["material_usd", "machining_usd", "bearings_usd", "sa_usd"]
+    cost_labels = ["Material", "Machining", "Bearings", "SA"]
+    cost_vals = [costs.get(k, 0) for k in cost_keys]
+    cost_colours = [TEAL, CORAL, GOLD, MINT]
+    wedges, texts, autos = ax1.pie(
+        cost_vals, labels=cost_labels, colors=cost_colours,
+        autopct=lambda p: f"{p:.0f}%" if p > 3 else "",
+        textprops={"color": "white", "fontsize": 9},
+        wedgeprops={"edgecolor": NAVY, "linewidth": 0.6},
+    )
+    for at in autos:
+        at.set_color("white")
+    ax1.set_facecolor(NAVY)
+    ax1.set_title(f"Total = ${costs.get('total_usd', sum(cost_vals)):.2f}", fontsize=9)
+
+    # Bar chart of cost components
+    ax2.bar(cost_labels, cost_vals, color=cost_colours, edgecolor=NAVY, linewidth=0.5)
+    for i, v in enumerate(cost_vals):
+        ax2.text(i, v + costs.get("total_usd", 1) * 0.01,
+                 f"${v:.1f}", ha="center", fontsize=8.5, color="white")
+    ax2.set_ylabel("Cost [USD]")
+    ax2.set_title("Cost Components", fontsize=9)
+    ax2.grid(axis="y", alpha=0.3)
+    plt.tight_layout()
+    p = os.path.join(save_dir, "07b_cost_breakdown.png")
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+    plt.close(fig); print(f"  Saved → {p}")
+
+    # ── Fig 07c: Improvement ratio and yield vs. n_bins ───────────────
+    if analyser is not None:
+        improve_per_bins = {n: [] for n in n_bins_list}
+        yield_per_bins   = {n: [] for n in n_bins_list}
+        for nb in n_bins_list:
+            res_nb = analyser.analyse_all(var_dict, n_bins=nb)
+            for r in res_nb:
+                improve_per_bins[nb].append(r.improvement_ratio)
+                yield_per_bins[nb].append(r.match_yield * 100)
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 5), facecolor=NAVY)
+        for ax in (ax1, ax2):
+            ax.set_facecolor("#112233")
+        fig.suptitle("Fig 07c — SA Performance vs. Number of Bins", color="white")
+
+        for j, res in enumerate(sa_results):
+            iname = res.interface_name[:20]
+            col   = SEG_COLS[j % len(SEG_COLS)]
+            imps  = [np.mean(improve_per_bins[nb]) for nb in n_bins_list]
+            ylds  = [np.mean(yield_per_bins[nb])   for nb in n_bins_list]
+            ax1.plot(n_bins_list, [improve_per_bins[nb][j] for nb in n_bins_list],
+                     marker="o", color=col, lw=1.8, label=iname)
+            ax2.plot(n_bins_list, [yield_per_bins[nb][j]  for nb in n_bins_list],
+                     marker="o", color=col, lw=1.8, label=iname)
+
+        ax1.set_xlabel("Number of bins"); ax1.set_ylabel("Scatter improvement ×")
+        ax1.set_title("Gap scatter improvement vs. bins"); ax1.legend(fontsize=7.5)
+        ax1.grid(True, alpha=0.3)
+
+        ax2.set_xlabel("Number of bins"); ax2.set_ylabel("Match yield [%]")
+        ax2.set_title("Assembly yield vs. bins"); ax2.legend(fontsize=7.5)
+        ax2.axhline(90, color=GOLD, lw=1.2, linestyle="--", label="90% target")
+        ax2.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        p = os.path.join(save_dir, "07c_sa_vs_bins.png")
+        fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+        plt.close(fig); print(f"  Saved → {p}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Smoke test
 # ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    import sys; sys.path.insert(0, ".")
+    import sys, os; sys.path.insert(0, ".")
     from design_variables import DesignSpace
 
     ds       = DesignSpace()
     nom      = ds.decode_vector(ds.get_nominal())
-
     analyser  = SelectiveAssemblyAnalyser(n_parts=1000)
     cost_mdl  = SpindleCostModel()
 
     print("\n🔩 SELECTIVE ASSEMBLY ANALYSIS — Nominal Design\n")
-
     for n_bins in [3, 5, 10]:
         sa_results = analyser.analyse_all(nom, n_bins=n_bins)
         print(f"\n  ── {n_bins} bins ──────────────────────────────")
         print(analyser.summary_table(sa_results).to_string(index=False))
-
         costs = cost_mdl.total_cost(nom, sa_results)
         print(f"\n  Cost breakdown:")
         for k, v in costs.items():
             print(f"    {k:<22} ${v:>8.2f}")
 
+    os.makedirs("/tmp/spindle_plots", exist_ok=True)
+    sa5    = analyser.analyse_all(nom, n_bins=5)
+    costs5 = cost_mdl.total_cost(nom, sa5)
+    print("\nGenerating SA plots...")
+    plot_selective_assembly(sa5, costs5, nom,
+                            n_bins_list=[3, 5, 7, 10],
+                            analyser=analyser,
+                            save_dir="/tmp/spindle_plots")
     print("\n✅ Selective Assembly module OK")

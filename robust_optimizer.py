@@ -196,41 +196,57 @@ class RobustOptimizer:
         return results
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Multi-objective fitness  (4 objectives)
+    # Multi-objective fitness  (4 objectives + catalog-snap penalty)
     # ─────────────────────────────────────────────────────────────────────────
     def multi_objective_fitness(self, x: np.ndarray) -> np.ndarray:
         """
         Evaluate all four objectives for a single design vector.
 
+        Catalog-snap penalty:
+            The optimizer works in continuous R2 space [35, 60] mm.
+            At each evaluation, the actual bore is snapped to the nearest
+            catalog value.  The snap residual:
+                δ_bore = |R2_optimizer × 2 − bore_catalog| [mm]
+            is penalised by adding to f3 (cost):
+                penalty = 500 × δ_bore   [USD/mm]
+            This steers the optimizer toward catalog-exact bore values
+            (where δ_bore = 0) making the raw and snapped designs identical.
+
         Returns:
             f: (4,) array [−SN_defl, −SN_stress, total_cost_USD, weight_kg]
         """
+        from design_variables import _ACBB_BORES
+
         # ── Robustness objectives (f1, f2) ────────────────────────────────
         sn = self.taguchi_sn_ratio(x, sn_type="smaller")
 
         # BUG-6 FIX — use pre-resolved indices, not hardcoded key lookup
-        defl_name  = self.surrogate.output_names[self._idx["deflection"]]
+        defl_name   = self.surrogate.output_names[self._idx["deflection"]]
         stress_name = self.surrogate.output_names[self._idx["stress"]]
         f1 = -sn[defl_name]["sn_ratio"]
         f2 = -sn[stress_name]["sn_ratio"]
 
-        # ── Cost objective (f3) — NEW ──────────────────────────────────────
+        # ── Cost objective (f3) with catalog-snap penalty ─────────────────
         var_dict   = self.design_space.decode_vector(x)
         sa_results = self.sa_analyser.analyse_all(var_dict, n_bins=self.n_sa_bins)
         cost_dict  = self.cost_model.total_cost(var_dict, sa_results)
         f3         = cost_dict["total_usd"]
 
+        # Catalog-snap penalty: steers optimizer to exact catalog bores
+        bore_raw    = var_dict["R2"] * 2.0
+        nearest_idx = int(np.argmin(np.abs(_ACBB_BORES - bore_raw)))
+        snap_bore   = _ACBB_BORES[nearest_idx]
+        delta_bore  = abs(bore_raw - snap_bore)          # mm gap
+        snap_penalty = 500.0 * delta_bore                # USD/mm — makes
+        f3 += snap_penalty                               # exact bores cheaper
+
         # ── Weight proxy (f4) ──────────────────────────────────────────────
-        L_total  = var_dict["L1"] + var_dict["L2"] + var_dict["L3"] + var_dict["L4"]
-        R_vals   = [var_dict["R1"], var_dict["R2"], var_dict["R3"], var_dict["R4"]]
-        L_vals   = [var_dict["L1"], var_dict["L2"], var_dict["L3"], var_dict["L4"]]
-        ri       = var_dict["ri"]
-        volume   = sum(
-            np.pi * (R**2 - ri**2) * L
-            for R, L in zip(R_vals, L_vals)
-        )
-        mass_kg  = volume * var_dict["rho"] * 1e3   # ton→kg
-        f4       = mass_kg
+        R_vals  = [var_dict["R1"], var_dict["R2"], var_dict["R3"], var_dict["R4"]]
+        L_vals  = [var_dict["L1"], var_dict["L2"], var_dict["L3"], var_dict["L4"]]
+        ri      = var_dict["ri"]
+        volume  = sum(np.pi * (R**2 - ri**2) * L for R, L in zip(R_vals, L_vals))
+        mass_kg = volume * var_dict["rho"] * 1e3   # ton→kg
+        f4      = mass_kg
 
         return np.array([f1, f2, f3, f4])
 
@@ -373,39 +389,218 @@ class RobustOptimizer:
 
     def report_best(
         self,
-        result: OptimizationResult,
+        result:        OptimizationResult,
+        n_rpm:         float = 4000.0,
+        save_csv_path: Optional[str] = None,
     ) -> Dict[str, object]:
         """
-        Decode and report the best design with all cost and SA details.
+        Report the best design with catalog-snapped bearing values.
+
+        IMPORTANT FIX: previous version saved raw optimizer values for R2,
+        K_radial, K_axial.  These are now replaced with catalog-derived
+        values via resolve_to_catalog() so the output is directly usable
+        on a drawing and BOM.
+
+        Args:
+            result       : OptimizationResult from optimize_de() or optimize_nsga2()
+            n_rpm        : Operating speed for catalog snap [RPM]
+            save_csv_path: If set, saves the manufacturable design to this CSV
+
+        Returns:
+            dict with keys:
+                design_variables     — raw optimizer vector (for surrogate calls)
+                catalog              — resolve_to_catalog() output
+                objectives           — f1..f4 values
+                costs                — cost breakdown
+                selective_assembly   — SA quality metrics
         """
-        x        = result.best_robust_design
-        var_dict = self.design_space.decode_vector(x)
+        x         = result.best_robust_design
+        # Use catalog-resolved design for reporting (not raw vector)
+        catalog   = self.design_space.resolve_to_catalog(x, n_rpm)
+        var_dict  = catalog["design_variables"]
+
+        # SA and cost use var_dict (raw) — that's correct because pos_tol,
+        # geometry etc. are still from the optimizer; only K values change
         sa_res   = self.sa_analyser.analyse_all(var_dict, self.n_sa_bins)
         costs    = self.cost_model.total_cost(var_dict, sa_res)
         f        = self.multi_objective_fitness(x)
 
+        # Add catalog stiffness to cost model bearing input for accuracy
+        costs_corrected = dict(costs)
+        costs_corrected["K_radial_used"] = catalog["K_radial_catalog"]
+        costs_corrected["K_axial_used"]  = catalog["K_axial_catalog"]
+
         report = {
-            "design_variables": var_dict,
-            "objectives":       dict(zip(self.objective_labels, f.tolist())),
-            "costs":            costs,
+            "design_variables":   var_dict,
+            "catalog":            catalog,
+            "objectives":         dict(zip(self.objective_labels, f.tolist())),
+            "costs":              costs_corrected,
             "selective_assembly": {
                 r.interface_name: {
-                    "improvement_x":    r.improvement_ratio,
-                    "std_with_sa_um":   r.std_gap_um,
-                    "std_no_sa_um":     r.std_gap_no_sa_um,
-                    "yield_pct":        r.match_yield * 100,
+                    "improvement_x":  r.improvement_ratio,
+                    "std_with_sa_um": r.std_gap_um,
+                    "std_no_sa_um":   r.std_gap_no_sa_um,
+                    "yield_pct":      r.match_yield * 100,
                 }
                 for r in sa_res
             },
         }
+
+        # Save manufacturable design to CSV if requested
+        if save_csv_path:
+            self._save_optimal_csv(catalog["manufacturable_design"], save_csv_path)
+
         return report
+
+    def _save_optimal_csv(self, mfg_design: Dict, path: str) -> None:
+        """
+        Save the catalog-resolved optimal design to CSV.
+
+        The CSV now contains:
+          - All geometry/material/load variables (raw optimizer values — correct)
+          - bore_catalog_mm   ← the actual SKF bore to order
+          - front_bearing     ← SKF part number
+          - rear_bearing      ← SKF part number
+          - K_radial_catalog  ← stiffness for ANSYS COMBIN14
+          - K_axial_catalog
+          - F_preload_MA_N
+        """
+        import csv
+        with open(path, "w", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=list(mfg_design.keys()))
+            writer.writeheader()
+            writer.writerow(mfg_design)
+        print(f"✅ Optimal design saved → {path}")
+        print(f"   Front bearing: {mfg_design.get('front_bearing','?')}")
+        print(f"   Rear  bearing: {mfg_design.get('rear_bearing','?')}")
+        print(f"   Bore (catalog): {mfg_design.get('bore_catalog_mm','?')} mm")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PLOTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_optimizer_results(
+    result:       "OptimizationResult",
+    design_space: "DesignSpace",
+    save_dir:     str = ".",
+) -> None:
+    """
+    Three optimizer-result plots.
+
+    Fig 05a — Pareto front scatter (f1 vs f2 coloured by f3=cost)
+    Fig 05b — Objective convergence (best f1+f2 per generation if available,
+               else bar chart of final objectives at best design)
+    Fig 05c — Best design variable values vs. bounds (normalised bar)
+    """
+    import matplotlib.pyplot as plt
+    import os
+
+    NAVY="#0d1b2a"; TEAL="#00b4d8"; CORAL="#e63946"; GOLD="#ffd166"
+    MINT="#06d6a0"; GRAY="#8d99ae"
+    os.makedirs(save_dir, exist_ok=True)
+    plt.rcParams.update({
+        "figure.facecolor": NAVY, "axes.facecolor": "#112233",
+        "axes.edgecolor": GRAY, "axes.labelcolor": "white",
+        "xtick.color": GRAY, "ytick.color": GRAY,
+        "text.color": "white", "grid.color": "#2d4060",
+        "grid.alpha": 0.4, "font.size": 9,
+    })
+
+    F      = result.pareto_front_F   # (n_pareto, 4)
+    X      = result.pareto_front_X   # (n_pareto, n_vars)
+    labels = result.objective_labels
+    names  = design_space.get_variable_names()
+    bounds = design_space.get_bounds()
+
+    # ── Fig 05a: Pareto front (f1 vs f2, colour = f3 cost) ───────────
+    fig, ax = plt.subplots(figsize=(9, 6), facecolor=NAVY)
+    ax.set_facecolor("#112233")
+    n_pts = len(F)
+    if n_pts > 1:
+        sc = ax.scatter(F[:, 0], F[:, 1], c=F[:, 2], cmap="plasma",
+                        s=40, edgecolors="none", alpha=0.85)
+        cb = plt.colorbar(sc, ax=ax)
+        cb.set_label("Total cost [USD]", color="white")
+        cb.ax.yaxis.set_tick_params(color="white")
+        plt.setp(cb.ax.yaxis.get_ticklabels(), color="white")
+    else:
+        ax.scatter(F[:, 0], F[:, 1], c=TEAL, s=80, marker="*", zorder=5)
+    # Highlight best point
+    best_idx = np.argmin(F[:, 0] + F[:, 1])  # min sum of robustness objectives
+    ax.scatter(F[best_idx, 0], F[best_idx, 1],
+               c=GOLD, s=150, marker="*", zorder=6, label="Best design")
+    ax.set_xlabel(labels[0] if len(labels) > 0 else "f1")
+    ax.set_ylabel(labels[1] if len(labels) > 1 else "f2")
+    ax.set_title("Fig 05a — Pareto Front  (f1=−SN_defl, f2=−SN_stress, colour=cost)",
+                 pad=8)
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    p = os.path.join(save_dir, "05a_pareto_front.png")
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+    plt.close(fig); print(f"  Saved → {p}")
+
+    # ── Fig 05b: Final objective values at best design ────────────────
+    fig, ax = plt.subplots(figsize=(9, 5), facecolor=NAVY)
+    ax.set_facecolor("#112233")
+    best_f  = F[best_idx]
+    f_names = labels if labels else [f"f{i+1}" for i in range(len(best_f))]
+    # Normalise each objective relative to its Pareto-front range
+    f_min = F.min(axis=0); f_max = F.max(axis=0)
+    f_range = np.where(np.abs(f_max - f_min) < 1e-10, 1.0, f_max - f_min)
+    f_norm  = (best_f - f_min) / f_range
+    colours = [TEAL, CORAL, GOLD, MINT][:len(best_f)]
+    bars = ax.bar(range(len(best_f)), f_norm, color=colours,
+                  edgecolor=NAVY, linewidth=0.5)
+    for bar, raw_val, fname in zip(bars, best_f, f_names):
+        ax.text(bar.get_x() + bar.get_width()/2,
+                bar.get_height() + 0.02,
+                f"{raw_val:.2f}", ha="center", va="bottom",
+                fontsize=8, color="white")
+    ax.set_xticks(range(len(f_names)))
+    ax.set_xticklabels([n[:20] for n in f_names], rotation=12, ha="right", fontsize=8)
+    ax.set_ylabel("Normalised objective (0=best, 1=worst in Pareto)")
+    ax.set_title("Fig 05b — Objective Values at Best Design", pad=8)
+    ax.set_ylim(0, 1.25)
+    ax.grid(axis="y", alpha=0.3)
+    plt.tight_layout()
+    p = os.path.join(save_dir, "05b_best_objectives.png")
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+    plt.close(fig); print(f"  Saved → {p}")
+
+    # ── Fig 05c: Best design variables vs. bounds ─────────────────────
+    fig, ax = plt.subplots(figsize=(13, 6), facecolor=NAVY)
+    ax.set_facecolor("#112233")
+    best_x  = X[best_idx]
+    nom_x   = design_space.get_nominal()
+    # Normalise each var to [0,1] within its bounds
+    x_norm  = (best_x - bounds[:, 0]) / (bounds[:, 1] - bounds[:, 0])
+    nom_norm = (nom_x - bounds[:, 0]) / (bounds[:, 1] - bounds[:, 0])
+    y_pos   = np.arange(len(names))
+    ax.barh(y_pos, x_norm, color=TEAL, alpha=0.75, height=0.5,
+            edgecolor=NAVY, linewidth=0.4, label="Optimal")
+    ax.scatter(nom_norm, y_pos, s=25, c=GOLD, zorder=5,
+               marker="|", linewidths=1.5, label="Nominal")
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(names, fontsize=7.5)
+    ax.set_xlabel("Normalised position in bounds  [0=lower, 1=upper]")
+    ax.set_title("Fig 05c — Optimal Design Variables (gold tick = nominal)", pad=8)
+    ax.axvline(0.5, color=GRAY, lw=0.8, linestyle="--", alpha=0.5)
+    ax.set_xlim(0, 1)
+    ax.legend(fontsize=8, loc="lower right")
+    ax.grid(axis="x", alpha=0.3)
+    plt.tight_layout()
+    p = os.path.join(save_dir, "05c_design_variables.png")
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+    plt.close(fig); print(f"  Saved → {p}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Smoke test
 # ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    import sys; sys.path.insert(0, ".")
+    import sys, os; sys.path.insert(0, ".")
     from design_variables import DesignSpace
     from ml_surrogate     import SurrogateModel
     from sklearn.dummy    import DummyRegressor
@@ -415,7 +610,6 @@ if __name__ == "__main__":
     ds = DesignSpace()
     n  = ds.get_bounds().shape[0]
 
-    # Build a mock surrogate with correct output names
     surr = SurrogateModel(model_type="gp")
     surr.output_names = [
         "static_max_deflection_um",
@@ -449,4 +643,8 @@ if __name__ == "__main__":
     for iname, stats in rpt["selective_assembly"].items():
         print(f"    {iname}: ×{stats['improvement_x']:.1f} improvement  "
               f"yield={stats['yield_pct']:.0f}%")
+
+    os.makedirs("/tmp/spindle_plots", exist_ok=True)
+    print("\nGenerating optimizer plots...")
+    plot_optimizer_results(res, ds, save_dir="/tmp/spindle_plots")
     print("\n✅ Robust Optimizer v2 OK")

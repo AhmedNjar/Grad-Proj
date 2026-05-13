@@ -268,7 +268,7 @@ class BearingStation:
     sub_arrangement:   Literal["single", "DB", "DF", "DT", "spacer_pair"]
     z_fraction_1:      float
     z_fraction_2:      Optional[float] = None
-    spacer_length_mm:  float           = 10.0
+    spacer_length_mm:  float           = 20.0
     preload_class:     str             = "MA"
 
     def z_positions_mm(self, L1: float, L2: float) -> List[float]:
@@ -377,23 +377,26 @@ class DesignSpace:
     """
 
     geometry: Dict[str, VariableBounds] = field(default_factory=lambda: {
-        "L1": VariableBounds(122.0,100.0,150.0, AsymmetricTolerance(0.500,0.000,note="IT12"), "mm","Nose section length"),
+        "L1": VariableBounds(80.0, 60.0, 90.0,  AsymmetricTolerance(0.500,0.000,note="IT12"), "mm","Nose section length"),
         "L2": VariableBounds(405.0,350.0,450.0, AsymmetricTolerance(0.500,0.000,note="IT12"), "mm","Journal section length"),
         "L3": VariableBounds(24.0, 15.0, 40.0,  AsymmetricTolerance(0.100,0.000,note="spacer IT10"), "mm","Flange section length"),
         "L4": VariableBounds(15.0, 10.0, 25.0,  AsymmetricTolerance(0.500,0.000,note="IT12"), "mm","Tail section length"),
         "R1": VariableBounds(45.0, 35.0, 55.0,  AsymmetricTolerance(0.000,0.011,note="ISO h5 Ø90"), "mm","Nose outer radius"),
-        "R2": VariableBounds(50.0, 35.0, 60.0,  AsymmetricTolerance(0.003,0.018,note="ISO h5 Ø80-120"), "mm","Journal radius (bearing seat)"),
+        "R2": VariableBounds(50.0, 35.0, 60.0,  AsymmetricTolerance(0.000,0.013,note="ISO h5 Ø80-120"), "mm","Journal radius (bearing seat)"),
         "R3": VariableBounds(82.5, 70.0, 95.0,  AsymmetricTolerance(0.050,0.050,note="bilateral"), "mm","Flange outer radius"),
         "R4": VariableBounds(45.0, 35.0, 55.0,  AsymmetricTolerance(0.000,0.011,note="ISO h5 Ø90"), "mm","Tail outer radius"),
         "ri": VariableBounds(30.0, 25.0, 35.0,  AsymmetricTolerance(0.021,0.000,note="ISO H7 Ø60"), "mm","Inner bore radius"),
     })
 
     bearings: Dict[str, VariableBounds] = field(default_factory=lambda: {
-        "front_z_fraction": VariableBounds(0.25,0.15,0.35, AsymmetricTolerance(0.010,0.010), "—","Front ACBB position (fraction of L2)"),
+        "front_z_fraction": VariableBounds(0.15,0.10,0.25, AsymmetricTolerance(0.010,0.010), "—","Front ACBB position (fraction of L2)"),
         "rear_z_fraction":  VariableBounds(0.75,0.65,0.85, AsymmetricTolerance(0.010,0.010), "—","Rear CRB pair centroid (fraction of L2)"),
-        "K_radial": VariableBounds(5.0e5,2.5e5,9.0e5, AsymmetricTolerance(5e4,5e4), "N/mm","Front bearing radial stiffness"),
-        "K_axial":  VariableBounds(8.0e5,4.0e5,1.4e6, AsymmetricTolerance(8e4,8e4), "N/mm","Front bearing axial stiffness"),
-        # ── NEW: Positional Tolerances (ISO 1101 ⊕) ──────────────────────
+        # NOTE: K_radial and K_axial are REMOVED as optimizer variables.
+        # They are READ-ONLY quantities derived from snap_to_skf_bearing(R2, n_rpm).
+        # Keeping them as free variables allowed the optimizer to create impossible
+        # designs: a bearing that is simultaneously K_radial→min and K_axial→max,
+        # which does not exist in any SKF catalog. Fixed in v4.
+        # ── Positional Tolerances (ISO 1101 ⊕) ────────────────────────────
         "pos_tol_front": VariableBounds(
             nominal=0.010, lower=0.005, upper=0.030,
             tolerance=AsymmetricTolerance(0.005,0.003, note="ISO 1101 ⊕, front seat"),
@@ -450,7 +453,131 @@ class DesignSpace:
         return (self.get_upper_tolerances() + self.get_lower_tolerances()) / 2.0
 
     def decode_vector(self, x: np.ndarray) -> Dict[str, float]:
+        """
+        Convert optimizer design vector to a named dictionary.
+
+        IMPORTANT: This returns the RAW optimizer values.
+        R2, K_radial, K_axial will NOT yet be catalog-snapped.
+        Always call resolve_to_catalog() before saving or reporting results.
+        """
         return {n: float(v) for n, v in zip(self.get_variable_names(), x)}
+
+    def resolve_to_catalog(
+        self,
+        x:           np.ndarray,
+        n_rpm:       float,
+        arrangement: Optional["SpindleBearingArrangement"] = None,
+    ) -> Dict[str, object]:
+        """
+        Produce the FULL manufacturable design specification.
+
+        This is the correct function to call when saving or reporting an
+        optimal design.  It:
+          1. Decodes the raw optimizer vector
+          2. Snaps R2 to the nearest real SKF catalog bearing
+          3. REPLACES K_radial and K_axial with catalog-derived values
+          4. Reports the real catalog designation (part number to order)
+
+        Returns a dict with keys:
+            design_variables  : raw optimizer values
+            catalog_front     : SKFBearing record (front ACBB)
+            catalog_rear      : SKFCRBBearing record (rear CRB)
+            K_radial_catalog  : actual pair radial stiffness [N/mm]
+            K_axial_catalog   : actual pair axial stiffness [N/mm]
+            bore_mm           : actual catalog bore [mm]
+            speed_ok          : bool
+            speed_warning     : str
+            manufacturable_design : flat dict ready for CSV export
+        """
+        import math as _math
+        arr     = arrangement or SpindleBearingArrangement.default_lathe()
+        v       = self.decode_vector(x)
+
+        # Snap to nearest catalog bearings
+        R2 = v["R2"]
+        brg_front, ok_f, warn_f = snap_to_skf_bearing(R2, "ACBB", n_rpm, arr.lubrication)
+        brg_rear,  ok_r, warn_r = snap_to_skf_bearing(R2, "CRB",  n_rpm, arr.lubrication)
+
+        # Catalog-derived stiffness (ACBB pair, DB stiffness factor = 1.7)
+        alpha     = _math.radians(brg_front.contact_angle_deg)
+        K_r_pair  = 1.7 * brg_front.radial_stiffness_single_N_mm
+        K_a_pair  = 1.7 * brg_front.radial_stiffness_single_N_mm * _math.tan(alpha)**2
+
+        # Build the flat manufacturable design (what to put on a drawing/BOM)
+        mfg = dict(v)
+        mfg["R2_nominal_mm"]      = R2                     # optimizer value
+        mfg["bore_catalog_mm"]    = float(brg_front.d)     # ← order THIS from SKF
+        mfg["front_bearing"]      = brg_front.designation  # part number
+        mfg["rear_bearing"]       = brg_rear.designation
+        mfg["K_radial_catalog"]   = K_r_pair               # ← use THIS in FEA
+        mfg["K_axial_catalog"]    = K_a_pair
+        mfg["F_preload_MA_N"]     = float(brg_front.F_preload_MA_N)
+        mfg["speed_ok"]           = ok_f and ok_r
+        mfg["speed_warning"]      = (warn_f or warn_r or "none")
+
+        return {
+            "design_variables":      v,
+            "catalog_front":         brg_front,
+            "catalog_rear":          brg_rear,
+            "K_radial_catalog":      K_r_pair,
+            "K_axial_catalog":       K_a_pair,
+            "bore_mm":               float(brg_front.d),
+            "speed_ok":              ok_f and ok_r,
+            "speed_warning":         warn_f or warn_r,
+            "manufacturable_design": mfg,
+        }
+
+    def print_catalog_sheet(self, x: np.ndarray, n_rpm: float = 4000.0) -> None:
+        """
+        Print a human-readable design sheet with catalog-snapped values.
+        Use this instead of printing raw decode_vector() output.
+        """
+        res  = self.resolve_to_catalog(x, n_rpm)
+        v    = res["design_variables"]
+        bf   = res["catalog_front"]
+        br   = res["catalog_rear"]
+        sep  = "─" * 65
+
+        print(f"\n{'═'*65}")
+        print(f"  MANUFACTURABLE DESIGN SPECIFICATION  @ {n_rpm:.0f} RPM")
+        print(f"{'═'*65}")
+        print(f"\n  Shaft Geometry:")
+        for name in ["L1","L2","L3","L4","R1","R2","R3","R4","ri"]:
+            print(f"    {name:<6} = {v[name]:>10.3f} mm")
+
+        print(f"\n  Bearing Seats:")
+        print(f"    Bore (catalog)  = {bf.d:>5.0f} mm   "
+              f"← order this, NOT R2×2={v['R2']*2:.1f}mm")
+        print(f"    front_z_frac    = {v['front_z_fraction']:.4f}")
+        print(f"    rear_z_frac     = {v['rear_z_fraction']:.4f}")
+
+        print(f"\n  Bearing Selection (SKF Catalog):")
+        print(f"    FRONT (locating) : {bf.designation}")
+        print(f"      d={bf.d}mm  D={bf.D}mm  B={bf.B}mm  "
+              f"C_r={bf.C_r/1e3:.1f}kN  n_gr={bf.n_grease}RPM")
+        print(f"      F_preload (MA) = {bf.F_preload_MA_N:.0f} N")
+        print(f"    REAR (floating)  : {br.designation} × 2")
+        print(f"      d={br.d}mm  D={br.D}mm  B={br.B}mm  "
+              f"C_r={br.C_r/1e3:.1f}kN  n_gr={br.n_grease}RPM")
+
+        print(f"\n  Catalog Stiffness (use in ANSYS COMBIN14):")
+        print(f"    K_radial pair   = {res['K_radial_catalog']:>10,.0f} N/mm  "
+              f"({res['K_radial_catalog']/1000:.0f} N/μm)")
+        print(f"    K_axial  pair   = {res['K_axial_catalog']:>10,.0f} N/mm  "
+              f"({res['K_axial_catalog']/1000:.0f} N/μm)")
+
+        print(f"\n  Positional Tolerances (ISO 1101 ⊕):")
+        print(f"    pos_tol_front   = ϕ{v['pos_tol_front']*1000:.1f} μm")
+        print(f"    pos_tol_rear    = ϕ{v['pos_tol_rear']*1000:.1f} μm")
+
+        print(f"\n  Material & Loads:")
+        for name in ["E","rho","sigma_y","Ft","Fr","Ff"]:
+            print(f"    {name:<8} = {v[name]:>12.4g}")
+
+        warn = res["speed_warning"]
+        print(f"\n  Speed check: {'✅ OK' if res['speed_ok'] else '❌'}"
+              + (f"  {warn}" if warn else ""))
+        print(f"{'═'*65}\n")
 
     def sample_manufacturing_variation(self, x_nominal, n_samples=1, seed=None) -> np.ndarray:
         rng    = np.random.default_rng(seed)
@@ -500,16 +627,16 @@ def plot_design_space(ds: DesignSpace, save_dir: str = ".") -> List:
 
     os.makedirs(save_dir, exist_ok=True)
 
-    NAVY  = "white"
+    NAVY  = "#0d1b2a"
     TEAL  = "#00b4d8"
     CORAL = "#e63946"
     GOLD  = "#ffd166"
     GRAY  = "#8d99ae"
     plt.rcParams.update({
-        "figure.facecolor": NAVY, "axes.facecolor": "white",
-        "axes.edgecolor": "lightgray", "axes.labelcolor": "black",
-        "xtick.color": "black", "ytick.color": "black",
-        "text.color": "black", "grid.color": "#e0e0e0",
+        "figure.facecolor": NAVY, "axes.facecolor": "#112233",
+        "axes.edgecolor": GRAY, "axes.labelcolor": "white",
+        "xtick.color": GRAY, "ytick.color": GRAY,
+        "text.color": "white", "grid.color": "#2d4060",
         "grid.alpha": 0.5, "font.size": 9,
     })
 
@@ -567,7 +694,7 @@ def plot_design_space(ds: DesignSpace, save_dir: str = ".") -> List:
     fig3, axes = plt.subplots(2, 3, figsize=(13, 8))
     fig3.patch.set_facecolor(NAVY)
     fig3.suptitle("Fig 3 — Manufacturing Variation Cloud (500 MC samples, geometric vars)",
-                  color="black", y=1.01)
+                  color="white", y=1.01)
     pairs = [(0,1),(0,2),(0,3),(1,2),(1,3),(2,3)]
     for ax, (i, j) in zip(axes.flat, pairs):
         xi = X_mc[:, geom_idx[i]]; xj = X_mc[:, geom_idx[j]]
