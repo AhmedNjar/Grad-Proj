@@ -338,10 +338,12 @@ class RDOMasterOrchestrator:
     # ─────────────────────────────────────────────────────────────────────────
     # Stage 7 — Runout
     # ─────────────────────────────────────────────────────────────────────────
-    def stage_runout(self, var_dict: dict, delta_nose_um: float, n_rpm: float) -> object:
+    def stage_runout(self, var_dict: dict, delta_nose_um: float, n_rpm: float,
+                     z_f: float = None, z_r: float = None) -> object:
         log.info("\n── STAGE 7: SHAFT RUNOUT ───────────────────────────────────────")
         M = self.m
-        z_f, z_r = M["shaft_runout"].get_bearing_positions_from_design(var_dict, self.arr)
+        if z_f is None or z_r is None:
+            z_f, z_r = M["shaft_runout"].get_bearing_positions_from_design(var_dict, self.arr)
         Fr_N = float(np.sqrt(var_dict["Ft"]**2 + var_dict["Fr"]**2))
 
         analyser = M["shaft_runout"].ShaftRunoutAnalyser(
@@ -583,15 +585,16 @@ class RDOMasterOrchestrator:
         var_d = self.ds.decode_vector(x_opt)
         cat   = self.ds.resolve_to_catalog(x_opt, n_rpm)
 
+        # Compute bearing positions once — used by stages 7, 8, 9, 11
+        z_f, z_r = self.m["shaft_runout"].get_bearing_positions_from_design(
+            var_d, self.arr)
+        span = max(z_r - z_f, 1.0)
+
         # 5. Selective Assembly
         self.stage_selective_assembly(var_d)
 
         # 6. Bearing Performance
         bearing_state = self.stage_bearing_performance(x_opt, n_rpm)
-
-        # Get z positions for runout/eccentricity
-        z_f, z_r = self.m["shaft_runout"].get_bearing_positions_from_design(var_d, self.arr)
-        span = max(z_r - z_f, 1.0)
 
         # 7. FEA single-point for reporting
         M   = self.m
@@ -600,10 +603,10 @@ class RDOMasterOrchestrator:
         fea_row = fea_df.iloc[0]
         delta_nose_um = float(fea_row["static_max_deflection_um"])
 
-        # 8. Runout
-        runout_bd = self.stage_runout(var_d, delta_nose_um, n_rpm)
+        # 8. Runout (uses precomputed z_f, z_r)
+        runout_bd = self.stage_runout(var_d, delta_nose_um, n_rpm, z_f, z_r)
 
-        # 9. Eccentricity
+        # 9. Eccentricity (uses precomputed span)
         ecc_result = self.stage_eccentricity(var_d, n_rpm, span)
 
         # 10. Inverse design
@@ -611,7 +614,7 @@ class RDOMasterOrchestrator:
 
         # 11. Tolerance Optimization (Option C — Module 12)
         self.stage_tolerance_optimization(
-            x_opt, delta_nose_um, state4.L10_system_hours, z_f, z_r,
+            x_opt, delta_nose_um, bearing_state.L10_system_hours, z_f, z_r,
         )
 
         # 12. Final report

@@ -26,6 +26,7 @@ import logging
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
+import os
 
 import numpy as np
 import pandas as pd
@@ -297,49 +298,6 @@ class FEAPoolRunner:
             pass   # pyarrow not installed — CSV is sufficient
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Smoke test — verify bearing-supported model gives physically sensible results
-# ──────────────────────────────────────────────────────────────────────────────
-if __name__ == "__main__":
-    from design_variables import DesignSpace
-    from lhs_sampler     import LHSSampler
-
-    ds = DesignSpace()
-    X  = LHSSampler(ds).generate_lhs(15, seed=42)
-
-    runner = FEAPoolRunner(X, ds, dry_run=True)
-    df     = runner.execute_batch()
-
-    cols = ["case_id", "static_max_deflection_um",
-            "static_max_vonmises_MPa", "freq_mode1_Hz"]
-    print(df[cols].to_string(index=False))
-
-    # Sanity: stiffening the shaft (larger R2) should reduce deflection
-    from design_variables import DesignSpace as DS
-    import copy
-
-    ds2  = DS()
-    nom  = ds2.get_nominal()
-    soft = nom.copy(); stiff = nom.copy()
-
-    # Find R2 index
-    idx_R2 = ds2.get_variable_names().index("R2")
-    soft[idx_R2]  = 40.0    # small radius
-    stiff[idx_R2] = 60.0    # large radius
-
-    X2 = np.vstack([soft, stiff])
-    r2 = FEAPoolRunner(X2, ds2, dry_run=True).execute_batch()
-    d_soft  = r2.iloc[0]["static_max_deflection_um"]
-    d_stiff = r2.iloc[1]["static_max_deflection_um"]
-    assert d_soft > d_stiff, f"Physics check failed: {d_soft:.2f} vs {d_stiff:.2f}"
-    print(f"\n✅ Stiffness check: R2=40→δ={d_soft:.2f}μm  R2=60→δ={d_stiff:.2f}μm (correct)")
-
-    os.makedirs("/tmp/spindle_plots", exist_ok=True)
-    print("\nGenerating FEA plots...")
-    plot_fea_results(df, ds, save_dir="/tmp/spindle_plots")
-    print("✅ FEA Pool Runner OK")
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # PLOT FUNCTION
 # ─────────────────────────────────────────────────────────────────────────────
@@ -508,3 +466,48 @@ def plot_fea_results(df, ds, save_dir="."):
     plt.tight_layout()
     p=os.path.join(save_dir,"03c_frequency_fos.png")
     fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY); plt.close(fig); print(f"  Saved → {p}")
+
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Smoke test — verify bearing-supported model gives physically sensible results
+# ──────────────────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    from design_variables import DesignSpace
+    from lhs_sampler     import LHSSampler
+
+    ds = DesignSpace()
+    X  = LHSSampler(ds).generate_lhs(15, seed=42)
+
+    runner = FEAPoolRunner(X, ds, dry_run=True)
+    df     = runner.execute_batch()
+
+    cols = ["case_id", "static_max_deflection_um",
+            "static_max_vonmises_MPa", "freq_mode1_Hz"]
+    print(df[cols].to_string(index=False))
+
+    # Sanity: stiffening the shaft (larger R2) should reduce deflection
+    from design_variables import DesignSpace as DS
+    import copy
+
+    ds2  = DS()
+    nom  = ds2.get_nominal()
+    soft = nom.copy(); stiff = nom.copy()
+
+    # Find R2 index
+    idx_R2 = ds2.get_variable_names().index("R2")
+    soft[idx_R2]  = 40.0    # small radius
+    stiff[idx_R2] = 60.0    # large radius
+
+    X2 = np.vstack([soft, stiff])
+    r2 = FEAPoolRunner(X2, ds2, dry_run=True).execute_batch()
+    d_soft  = r2.iloc[0]["static_max_deflection_um"]
+    d_stiff = r2.iloc[1]["static_max_deflection_um"]
+    assert d_soft > d_stiff, f"Physics check failed: {d_soft:.2f} vs {d_stiff:.2f}"
+    print(f"\n✅ Stiffness check: R2=40→δ={d_soft:.2f}μm  R2=60→δ={d_stiff:.2f}μm (correct)")
+
+    os.makedirs("/tmp/spindle_plots", exist_ok=True)
+    print("\nGenerating FEA plots...")
+    plot_fea_results(df, ds, save_dir="/tmp/spindle_plots")
+    print("✅ FEA Pool Runner OK")
+

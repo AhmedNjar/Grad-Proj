@@ -229,126 +229,6 @@ class LHSSampler:
         print(f"✅ Saved {len(X)} samples → {filepath}")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Smoke test
-# ──────────────────────────────────────────────────────────────────────────────
-if __name__ == "__main__":
-    from design_variables import DesignSpace
-
-    ds      = DesignSpace()
-    sampler = LHSSampler(ds)
-
-    print(f"\nDesign space: {sampler.n_vars} variables\n")
-
-    X_lhs   = sampler.generate_lhs(50, criterion="maximin")
-    X_sobol = sampler.generate_sobol(64, scramble=True)
-    X_mc    = sampler.generate_montecarlo(100, distribution="normal")
-    X_n, X_p = sampler.generate_hybrid(n_lhs=20, n_mc_per_lhs=5)
-
-    print(f"LHS    shape: {X_lhs.shape}")
-    print(f"Sobol  shape: {X_sobol.shape}")
-    print(f"MC     shape: {X_mc.shape}")
-    print(f"Hybrid nominal={X_n.shape}  perturbed={X_p.shape}")
-
-    # All criteria should work now (BUG-4 fix)
-    for crit in ["maximin", "center", "centermaximin", "correlation"]:
-        X = sampler.generate_lhs(10, criterion=crit, seed=0)
-        print(f"  criterion='{crit}' → shape {X.shape}  ✓")
-
-    sampler.save_samples(X_lhs, "/tmp/lhs_test.csv", fmt="csv")
-
-    os.makedirs("/tmp/spindle_plots", exist_ok=True)
-    print("\nGenerating LHS plots...")
-    plot_lhs_samples(X_lhs, ds, save_dir="/tmp/spindle_plots")
-    print("\n✅ LHS sampler v2 OK")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# PLOT FUNCTION
-# ─────────────────────────────────────────────────────────────────────────────
-
-def plot_lhs_samples(
-    X:        np.ndarray,
-    ds:       "DesignSpace",
-    save_dir: str = ".",
-) -> None:
-    """
-    Three LHS diagnostic plots.
-    Fig 02a — Coverage dot chart (all vars, normalised)
-    Fig 02b — 2D scatter matrix (L1, L2, R1, R2)
-    Fig 02c — Empirical CDF vs. ideal uniform (all 19 vars)
-    """
-    import matplotlib.pyplot as plt
-    import os
-
-    NAVY="#0d1b2a"; TEAL="#00b4d8"; CORAL="#e63946"; GOLD="#ffd166"; GRAY="#8d99ae"
-    os.makedirs(save_dir, exist_ok=True)
-    plt.rcParams.update({
-        "figure.facecolor": NAVY, "axes.facecolor": "#112233",
-        "axes.edgecolor": GRAY, "axes.labelcolor": "white",
-        "xtick.color": GRAY, "ytick.color": GRAY, "text.color": "white",
-        "grid.color": "#2d4060", "grid.alpha": 0.4, "font.size": 8,
-    })
-
-    names  = ds.get_variable_names()
-    bounds = ds.get_bounds()
-    X_norm = (X - bounds[:, 0]) / (bounds[:, 1] - bounds[:, 0])
-
-    # Fig 02a: Coverage dot chart
-    fig, ax = plt.subplots(figsize=(13, 5), facecolor=NAVY)
-    ax.set_facecolor("#112233")
-    for i, name in enumerate(names):
-        col_data = X_norm[:, i]
-        hist, _ = np.histogram(col_data, bins=max(5, X.shape[0]//3), range=(0,1))
-        cv = np.std(hist) / max(np.mean(hist), 1e-12)
-        colour = TEAL if cv < 0.4 else CORAL
-        ax.barh(i, 1.0, color=colour, alpha=0.12, height=0.8)
-        ax.scatter(col_data, [i]*len(col_data), s=12, color=colour, alpha=0.7)
-    ax.set_yticks(range(len(names))); ax.set_yticklabels(names, fontsize=7.5)
-    ax.set_xlabel("Normalised [0, 1]")
-    ax.set_title(f"Fig 02a — LHS Coverage  (n={X.shape[0]})", pad=8)
-    from matplotlib.patches import Patch
-    ax.legend(handles=[Patch(color=TEAL,label="Uniform (CV<0.4)"),
-                        Patch(color=CORAL,label="Clustered (CV≥0.4)")], fontsize=8)
-    plt.tight_layout()
-    p = os.path.join(save_dir, "02a_lhs_coverage.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY); plt.close(fig)
-    print(f"  Saved → {p}")
-
-    # Fig 02b: 2D scatter pairs
-    geom_names = [n for n in names if n in ["L1","L2","R1","R2"]]
-    geom_idx   = [names.index(n) for n in geom_names]
-    pairs = [(0,1),(0,2),(0,3),(1,2),(1,3),(2,3)]
-    fig, axes = plt.subplots(2, 3, figsize=(12, 7), facecolor=NAVY)
-    fig.suptitle("Fig 02b — LHS 2D Projections", color="white", y=1.01)
-    for ax, (i, j) in zip(axes.flat, pairs):
-        ax.set_facecolor("#112233")
-        ax.scatter(X[:,geom_idx[i]], X[:,geom_idx[j]], s=15, c=TEAL, alpha=0.6)
-        ax.set_xlabel(geom_names[i], fontsize=8); ax.set_ylabel(geom_names[j], fontsize=8)
-    plt.tight_layout()
-    p = os.path.join(save_dir, "02b_lhs_scatter.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY); plt.close(fig)
-    print(f"  Saved → {p}")
-
-    # Fig 02c: CDF vs uniform
-    fig, axes = plt.subplots(3, 7, figsize=(14, 6), facecolor=NAVY)
-    fig.suptitle("Fig 02c — Empirical CDF vs Ideal Uniform", color="white", y=1.01)
-    ideal = np.linspace(0, 1, 200)
-    for ax, name, i in zip(axes.flat, names, range(len(names))):
-        ax.set_facecolor("#112233")
-        sc = np.sort(X_norm[:, i])
-        ecdf = np.arange(1, len(sc)+1) / len(sc)
-        ax.step(sc, ecdf, color=TEAL, lw=1.2)
-        ax.plot(ideal, ideal, color=GOLD, lw=0.8, linestyle="--")
-        ax.set_title(name, fontsize=6.5, color="white"); ax.tick_params(labelsize=5)
-    for ax in axes.flat[len(names):]:
-        ax.set_visible(False)
-    plt.tight_layout()
-    p = os.path.join(save_dir, "02c_lhs_cdf.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY); plt.close(fig)
-    print(f"  Saved → {p}")
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # PLOTS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -415,3 +295,35 @@ def plot_lhs_samples(X, ds, save_dir="."):
     p = os.path.join(save_dir,"02c_lhs_cdf.png")
     fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY); plt.close(fig)
     print(f"  Saved → {p}")
+
+
+if __name__ == "__main__":
+    from design_variables import DesignSpace
+    import os
+
+    ds      = DesignSpace()
+    sampler = LHSSampler(ds)
+
+    print(f"\nDesign space: {sampler.n_vars} variables\n")
+
+    X_lhs   = sampler.generate_lhs(50, criterion="maximin")
+    X_sobol = sampler.generate_sobol(64, scramble=True)
+    X_mc    = sampler.generate_montecarlo(100, distribution="normal")
+    X_n, X_p = sampler.generate_hybrid(n_lhs=20, n_mc_per_lhs=5)
+
+    print(f"LHS    shape: {X_lhs.shape}")
+    print(f"Sobol  shape: {X_sobol.shape}")
+    print(f"MC     shape: {X_mc.shape}")
+    print(f"Hybrid nominal={X_n.shape}  perturbed={X_p.shape}")
+
+    # All criteria should work now (BUG-4 fix)
+    for crit in ["maximin", "center", "centermaximin", "correlation"]:
+        X = sampler.generate_lhs(10, criterion=crit, seed=0)
+        print(f"  criterion='{crit}' → shape {X.shape}  ✓")
+
+    sampler.save_samples(X_lhs, "/tmp/lhs_test.csv", fmt="csv")
+
+    os.makedirs("/tmp/spindle_plots", exist_ok=True)
+    print("\nGenerating LHS plots...")
+    plot_lhs_samples(X_lhs, ds, save_dir="/tmp/spindle_plots")
+    print("\n✅ LHS sampler v2 OK")
