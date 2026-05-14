@@ -252,6 +252,13 @@ class FEAPoolRunner:
 
         v = self.design_space.decode_vector(x)
 
+        # ── تعديل للحماية: حساب الجساءة ديناميكياً من الكتالوج لأنها لم تعد في الـ Design Space ──
+        from design_variables import snap_to_skf_bearing
+        brg_front, _, _ = snap_to_skf_bearing(v["R2"], "ACBB", 4000.0, "grease")
+        K_radial_calc = float(1.7 * brg_front.radial_stiffness_single_N_mm)
+        # جلب الجساءة المحورية بأمان، مع وضع قيمة احتياطية في حال لم تكن معرفة بنفس الاسم
+        K_axial_calc = float(1.7 * getattr(brg_front, "axial_stiffness_single_N_mm", brg_front.radial_stiffness_single_N_mm * 0.7))
+
         case = SimulationCase(
             case_id  = case_id,
             geometry = SpindleGeometry(
@@ -266,7 +273,7 @@ class FEAPoolRunner:
             bearings = BearingConfig(
                 front_z_fraction=v["front_z_fraction"],
                 rear_z_fraction =v["rear_z_fraction"],
-                K_radial=v["K_radial"], K_axial=v["K_axial"],
+                K_radial=K_radial_calc, K_axial=K_axial_calc, # تعديل: استخدام القيم المحسوبة ديناميكياً
             ),
             loads    = CuttingLoads(Ft=v["Ft"], Fr=v["Fr"], Ff=v["Ff"]),
             mesh     = MeshConfig(),
@@ -283,7 +290,7 @@ class FEAPoolRunner:
         res.update({f"var_{k}": float(v_) for k, v_ in v.items()})
         res["mode"] = "ansys_mapdl"
         return res
-
+    
     # ─────────────────────────────────────────────────────────────────────────
     # Persistence
     # ─────────────────────────────────────────────────────────────────────────

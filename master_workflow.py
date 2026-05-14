@@ -176,6 +176,11 @@ class RDOMasterOrchestrator:
         df = runner.execute_batch(max_failures=10, save_interval=20)
         elapsed = time.time() - t0
 
+        # ── إضافة حماية هنا ──
+        if df.empty:
+            log.error("❌ All FEA simulation cases failed! Please check PyMAPDL configuration or ANSYS licenses.")
+            sys.exit(1)
+
         path = self.out_dir / "fea_results.csv"
         df.to_csv(path, index=False)
         log.info(f"✅ {len(df)} FEA cases in {elapsed:.1f}s → {path}")
