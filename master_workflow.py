@@ -71,18 +71,18 @@ def _import_all():
 
     mods = {}
     mod_paths = {
-        "design_variables":    "01_design_variables",
-        "lhs_sampler":         "02_lhs_sampler",
-        "fea_pool_runner":     "03_fea_pool_runner",
-        "ml_surrogate":        "04_ml_surrogate",
-        "selective_assembly":  "07_selective_assembly",   # must be before robust_optimizer
-        "robust_optimizer":    "05_robust_optimizer",
-        "inverse_design":      "06_inverse_design",
-        "bearing_performance": "08_bearing_performance",
-        "shaft_runout":        "09_shaft_runout",
-        "rotor_eccentricity":  "10_rotor_eccentricity",
-        "final_report":        "11_final_report",
-        "tolerance_optimizer": "12_tolerance_optimizer",
+        "design_variables":    "design_variables",
+        "lhs_sampler":         "lhs_sampler",
+        "fea_pool_runner":     "fea_pool_runner",
+        "ml_surrogate":        "ml_surrogate",
+        "selective_assembly":  "selective_assembly",   # must be before robust_optimizer
+        "robust_optimizer":    "robust_optimizer",
+        "inverse_design":      "inverse_design",
+        "bearing_performance": "bearing_performance",
+        "shaft_runout":        "shaft_runout",
+        "rotor_eccentricity":  "rotor_eccentricity",
+        "final_report":        "final_report",
+        "tolerance_optimizer": "tolerance_optimizer",
     }
 
     # Add script directory to path so bare imports work
@@ -671,7 +671,7 @@ def parse_args():
     p.add_argument("--n_samples",     type=int,   default=50)
     p.add_argument("--dry_run",       action="store_true")
     p.add_argument("--surrogate",     choices=["gp","xgb","mlp"], default="gp")
-    p.add_argument("--opt_method",    choices=["de","nsga2"],     default="de")
+    p.add_argument("--opt_method",    choices=["de","nsga2"],     default="nsga2")
     p.add_argument("--output_dir",    default="rdo_results")
     p.add_argument("--no_plots",      action="store_true")
     p.add_argument("--n_rpm",         type=float, default=4000.0)
