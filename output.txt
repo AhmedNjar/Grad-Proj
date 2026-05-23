@@ -1,0 +1,287 @@
+08:57:03 | INFO     | Master summary saved to: rdo_results\fea_cache\case_0050\master_summary.csv
+08:57:03 | INFO     | JSON summary saved to: rdo_results\fea_cache\case_0050\master_summary.json
+FEA Pool: 100%|██████████████████████████████████████████████████████████████████████████████| 50/50 [19:45<00:00, 23.71s/it]
+08:57:03 | INFO     | ✅ Batch done: 47/50 successful
+08:57:03 | INFO     | ✅ 47 FEA cases in 1185.7s → rdo_results\fea_results.csv
+08:57:03 | INFO     |    δ: 40.3 μm  σ: 31.2 MPa  f1: 496 Hz
+08:57:03 | INFO     |    Generating FEA plots...
+  Saved → rdo_results\plots\03a_fea_distributions.png
+  Saved → rdo_results\plots\03b_deflection_sensitivity.png
+  Saved → rdo_results\plots\03c_frequency_fos.png
+08:57:04 | INFO     | 
+── STAGE 3: ML SURROGATE ──────────────────────────────────────
+08:57:04 | INFO     | Initialised GP Surrogate Model
+08:57:04 | INFO     | Training on 47 samples, 19 features, 6 outputs
+08:57:04 | INFO     |   ► static_max_deflection_um
+08:57:06 | INFO     |      CV R² = 0.7048 ± 0.1395
+08:57:06 | INFO     |   ► static_max_vonmises_MPa
+08:57:08 | INFO     |      CV R² = 0.7420 ± 0.1064
+08:57:08 | INFO     |   ► static_factor_of_safety
+08:57:10 | INFO     |      CV R² = 0.6558 ± 0.1751
+08:57:10 | INFO     |   ► freq_mode1_Hz
+08:57:12 | INFO     |      CV R² = 0.7691 ± 0.1548
+08:57:12 | INFO     |   ► freq_mode2_Hz
+08:57:14 | INFO     |      CV R² = 0.9117 ± 0.0579
+08:57:14 | INFO     |   ► freq_mode3_Hz
+08:57:15 | INFO     |      CV R² = 0.9064 ± 0.0646
+08:57:15 | INFO     | ✅ Training complete!
+08:57:15 | INFO     | 💾 Saved → rdo_results\surrogate_gp.pkl
+08:57:15 | INFO     | ✅ Surrogate trained → rdo_results\surrogate_gp.pkl
+08:57:15 | INFO     |    CV R² per output:
+08:57:15 | INFO     |      static_max_deflection_um            R²=1.0000
+08:57:15 | INFO     |      static_max_vonmises_MPa             R²=1.0000
+08:57:15 | INFO     |      static_factor_of_safety             R²=1.0000
+08:57:15 | INFO     |      freq_mode1_Hz                       R²=1.0000
+08:57:15 | INFO     |      freq_mode2_Hz                       R²=1.0000
+08:57:15 | INFO     |      freq_mode3_Hz                       R²=1.0000
+08:57:15 | INFO     |    Generating surrogate plots...
+  Saved → rdo_results\plots\04a_surrogate_pva.png
+  Saved → rdo_results\plots\04b_surrogate_residuals.png
+ ** On entry to DLASCLS parameter number  4 had an illegal value
+ ** On entry to DLASCLS parameter number  4 had an illegal value
+ ** On entry to DLASCLS parameter number  4 had an illegal value
+ ** On entry to DLASCLS parameter number  4 had an illegal value
+ ** On entry to DLASCLS parameter number  5 had an illegal value
+ ** On entry to DLASCLS parameter number  4 had an illegal value
+  04c skipped: SVD did not converge in Linear Least Squares
+08:57:17 | INFO     | 
+── STAGE 4: ROBUST OPTIMIZATION ───────────────────────────────
+08:57:17 | INFO     | RobustOptimizer ready  n_vars=19  n_obj=4  n_mc_inner=20  sa_bins=5
+08:57:17 | INFO     | Running NSGA-II multi-objective (100 pop × 50 gen)...
+08:57:29 | INFO     | ✅ NSGA-II done  Pareto points=100
+08:57:29 | INFO     | ✅ Optimal design saved → rdo_results\optimal_design.csv
+08:57:29 | INFO     |    Front bearing : 7218 BECBP
+08:57:29 | INFO     |    Rear  bearing : NU2218 ECP
+08:57:29 | INFO     |    Bore (catalog): 90.0 mm
+08:57:29 | INFO     |    K_radial      : 273,208 N/mm
+08:57:29 | INFO     |    Generating optimizer plots...
+  Saved → rdo_results\plots\05a_pareto_front.png
+  Saved → rdo_results\plots\05b_best_objectives.png
+  Saved → rdo_results\plots\05c_design_variables.png
+08:57:29 | INFO     | 
+── STAGE 5: SELECTIVE ASSEMBLY ─────────────────────────────────
+08:57:29 | INFO     |    SA Results (5 bins):
+08:57:29 | INFO     |      Journal_InnerRace              ×3.0  yield=96%
+08:57:29 | INFO     |      InnerSpacer_OuterSpacer        ×5.0  yield=98%
+08:57:29 | INFO     |      Housing_OuterRing              ×2.6  yield=96%
+08:57:29 | INFO     |    Total cost: $1073.89
+  Saved → rdo_results\plots\07a_sa_gap_distribution.png
+  Saved → rdo_results\plots\07b_cost_breakdown.png
+  Saved → rdo_results\plots\07c_sa_vs_bins.png
+08:57:31 | INFO     | 
+── STAGE 6: BEARING PERFORMANCE ────────────────────────────────
+08:57:31 | INFO     |    System L10 : 430,245 h
+08:57:31 | INFO     |    Constraints: ALL OK
+08:57:31 | INFO     |    ANSYS COMBIN14 spring table:
+08:57:31 | INFO     |      z=  156.9mm  K_r=  160711  K_a=   34945  front
+08:57:31 | INFO     |      z=  325.4mm  K_r=  292741  K_a=       0  rear
+08:57:31 | INFO     |      z=  362.9mm  K_r=  292741  K_a=       0  rear
+  Saved → rdo_results\plots\08a_l10_vs_speed.png
+  Saved → rdo_results\plots\08b_stiffness_per_station.png
+  Saved → rdo_results\plots\08c_constraints.png
+08:57:32 | INFO     | FEA Pool Runner  mode=DRY-RUN (analytical v2)  n=1
+FEA Pool: 100%|████████████████████████████████████████████████████████████████████████████████████████| 1/1 [00:00<?, ?it/s]
+08:57:32 | INFO     | ✅ Batch done: 1/1 successful
+08:57:32 | INFO     | 
+── STAGE 7: SHAFT RUNOUT ───────────────────────────────────────
+08:57:32 | INFO     |    TIR (RSS)  : 18.17 μm
+08:57:32 | INFO     |    TIR (linear): 36.51 μm
+08:57:32 | INFO     |    Dominant source: ANSYS deflection
+08:57:32 | INFO     |    Constraints: VIOLATED
+  Saved → rdo_results\plots\09a_runout_breakdown.png
+  Saved → rdo_results\plots\09b_runout_vs_speed.png
+  Saved → rdo_results\plots\09c_tir_sensitivity.png
+08:57:33 | INFO     | 
+── STAGE 8: ROTOR ECCENTRICITY ─────────────────────────────────
+08:57:33 | INFO     |    e_static : 3.24 μm
+08:57:33 | INFO     |    U_static : 51.5 g·mm  (allow 94.9)
+08:57:33 | INFO     |    F_imbal  : 9.044 N
+08:57:33 | INFO     |    Couple C : 134.0 g·mm²
+08:57:33 | INFO     |    Constraints: OK
+  Saved → rdo_results\plots\10a_imbalance_vs_speed.png
+  Saved → rdo_results\plots\10b_per_segment_imbalance.png
+  Saved → rdo_results\plots\10c_imbalance_force_vs_speed.png
+08:57:34 | INFO     | 
+── STAGE 9: INVERSE DESIGN ─────────────────────────────────────
+08:57:34 | INFO     | InverseDesignEngine  backend=sklearn MLP
+08:57:34 | INFO     | Training inverse model  inputs(perf)=3  outputs(design)=19  samples=47
+08:57:34 | INFO     | ✅ Inverse model trained  val_R²=-0.0406
+08:57:34 | INFO     | 💾 Saved → rdo_results\inverse_engine.pkl
+08:57:34 | INFO     |    val R² = -0.0406  → rdo_results\inverse_engine.pkl
+08:57:34 | INFO     |    Inverse target: {'static_max_deflection_um': 10.0, 'static_max_vonmises_MPa': 300.0, 'freq_mode1_Hz': 600.0}
+08:57:34 | INFO     |    Predicted R2=41.13mm  L1=73.8mm
+  Saved → rdo_results\plots\06a_inverse_validation.png
+  Saved → rdo_results\plots\06b_inverse_design_vars.png
+  Saved → rdo_results\plots\06c_inverse_error.png
+08:57:35 | INFO     | 
+── STAGE 11: TOLERANCE OPTIMISATION (Module 12) ────────────────
+
+  Tolerance Optimizer: 64 IT combos × 18 weight vectors = 1152 evaluations
+  Total evaluated   : 1152
+  Pareto-optimal    : 85
+  Feasible (TIR≤12.0μm, L10_loss≤20.0%): 57
+
+════════════════════════════════════════════════════════════════════════
+  TOLERANCE OPTIMISATION REPORT
+════════════════════════════════════════════════════════════════════════
+
+  Pareto front: 85 non-dominated designs
+
+  IT_j   IT_b   IT_l    pos_f[μm]  pos_r[μm]   Ra_j   Ra_b  Cost[$]  TIR[μm]  L10loss
+  ──────────────────────────────────────────────────────────────────────
+  IT7    IT9    IT13          5.0        8.0   0.20    1.6     1392    24.21     2.7%
+  IT7    IT9    IT12          5.0        8.0   0.20    1.6     1397    24.21     2.5%
+  IT7    IT9    IT11          5.0        8.0   0.20    1.6     1405    24.21     2.4%
+  IT7    IT8    IT13          5.0        8.0   0.20    1.6     1420    20.13     2.7%
+  IT7    IT9    IT10          5.0        8.0   0.20    1.6     1421    24.21     2.4%
+  IT7    IT8    IT12          5.0        8.0   0.20    1.6     1425    20.13     2.5%
+  IT7    IT8    IT11          5.0        8.0   0.20    1.6     1433    20.13     2.4%
+  IT7    IT8    IT10          5.0        8.0   0.20    1.6     1449    20.13     2.4%
+  IT7    IT7    IT13          5.0        8.0   0.20    1.6     1476    18.43     2.7%
+  IT7    IT7    IT12          5.0        8.0   0.20    1.6     1481    18.43     2.5%
+  IT7    IT7    IT11          5.0        8.0   0.20    1.6     1489    18.43     2.4%
+  IT7    IT7    IT10          5.0        8.0   0.20    1.6     1505    18.43     2.4%
+  IT7    IT6    IT13          5.0        8.0   0.20    1.6     1588    17.62     2.7%
+  IT7    IT6    IT12          5.0        8.0   0.20    1.6     1593    17.62     2.5%
+  IT7    IT6    IT11          5.0        8.0   0.20    1.6     1601    17.62     2.4%
+  IT7    IT6    IT10          5.0        8.0   0.20    1.6     1617    17.62     2.4%
+  IT6    IT8    IT13          5.0        8.0   0.20    1.6     2428    15.77     2.7%
+  IT6    IT8    IT12          5.0        8.0   0.20    1.6     2433    15.77     2.5%
+  IT6    IT8    IT11          5.0        8.0   0.20    1.6     2441    15.77     2.4%
+  IT6    IT8    IT10          5.0        8.0   0.20    1.6     2457    15.77     2.4%
+  IT6    IT7    IT13          5.0        8.0   0.20    1.6     2484    13.53     2.7%
+  IT6    IT7    IT12          5.0        8.0   0.20    1.6     2489    13.53     2.5%
+  IT6    IT7    IT11          5.0        8.0   0.20    1.6     2497    13.53     2.4%
+  IT6    IT7    IT10          5.0        8.0   0.20    1.6     2513    13.53     2.4%
+  IT6    IT6    IT13          5.0        8.0   0.20    1.6     2596    12.41     2.7%
+  IT6    IT6    IT12          5.0        8.0   0.20    6.3     2597    12.41     2.5%
+  IT6    IT6    IT11          5.0        8.0   0.20    1.6     2609    12.41     2.4%
+  IT6    IT6    IT10          5.0        8.0   0.20    1.6     2625    12.41     2.4%
+  IT5    IT7    IT13          5.0        8.0   1.60    6.3     4112    11.43    19.5% ◄ BEST
+  IT5    IT7    IT12          5.0        8.0   1.60    6.3     4117    11.43    19.3%
+  IT5    IT7    IT11          5.0        8.0   1.60    6.3     4125    11.43    19.2%
+  IT5    IT7    IT10          5.0        8.0   1.60    6.3     4141    11.43    19.2%
+  IT5    IT7    IT13          5.0        8.0   0.80    6.3     4156    11.35     9.9%
+  IT5    IT7    IT13          5.0        8.0   0.80    1.6     4160    11.35     9.9%
+  IT5    IT7    IT12          5.0        8.0   0.80    6.3     4161    11.35     9.7%
+  IT5    IT7    IT11          5.0        8.0   0.80    6.3     4169    11.35     9.6%
+  IT5    IT7    IT11          5.0        8.0   0.80    1.6     4173    11.35     9.6%
+  IT5    IT7    IT10          5.0        8.0   0.80    6.3     4185    11.35     9.6%
+  IT5    IT7    IT10          5.0        8.0   0.80    1.6     4189    11.35     9.6%
+  IT5    IT6    IT13          5.0        8.0   1.60    6.3     4224    10.08    19.5%
+  IT5    IT6    IT12          5.0        8.0   1.60    6.3     4229    10.08    19.3%
+  IT5    IT6    IT11          5.0        8.0   1.60    6.3     4237    10.08    19.2%
+  IT5    IT6    IT10          5.0        8.0   1.60    6.3     4253    10.08    19.2%
+  IT5    IT7    IT13          5.0        8.0   0.40    1.6     4256    11.34     5.1%
+  IT5    IT7    IT12          5.0        8.0   0.40    1.6     4261    11.34     4.9%
+  IT5    IT7    IT11          5.0        8.0   0.40    1.6     4269    11.34     4.8%
+  IT5    IT6    IT13          5.0        8.0   0.80    1.7     4272     9.99     9.9%
+  IT5    IT6    IT13          5.0        8.0   0.80    1.6     4272     9.99     9.9%
+  IT5    IT6    IT12          5.0        8.0   0.80    6.3     4273     9.99     9.7%
+  IT5    IT6    IT12          5.0        8.0   0.80    1.6     4277     9.99     9.7%
+  IT5    IT6    IT11          5.0        8.0   0.80    6.3     4281     9.99     9.6%
+  IT5    IT7    IT10          5.0        8.0   0.40    6.3     4281    11.34     4.8%
+  IT5    IT6    IT11          5.0        8.0   0.80    1.7     4285     9.99     9.6%
+  IT5    IT6    IT10          5.0        8.0   0.80    6.3     4297     9.99     9.6%
+  IT5    IT6    IT13          5.0        8.0   0.40    1.6     4368     9.97     5.1%
+  IT5    IT6    IT12          5.0        8.0   0.40    1.6     4373     9.97     4.9%
+  IT5    IT6    IT11          5.0        8.0   0.40    1.6     4381     9.97     4.8%
+  IT5    IT6    IT10          5.0        8.0   0.40    1.6     4397     9.97     4.8%
+  IT5    IT7    IT13          5.0        8.0   0.20    6.3     4424    11.33     2.7%
+  IT5    IT7    IT12          5.0        8.0   0.20    6.3     4429    11.33     2.5%
+  IT5    IT7    IT11          5.0        8.0   0.20    6.3     4437    11.33     2.4%
+  IT5    IT7    IT10          5.0        8.0   0.20    6.3     4453    11.33     2.4%
+  IT5    IT6    IT13          5.0        8.0   0.20    6.3     4536     9.97     2.7%
+  IT5    IT6    IT12          5.0        8.0   0.20    6.3     4541     9.97     2.5%
+  IT5    IT6    IT11          5.0        8.0   0.20    6.3     4549     9.97     2.4%
+  IT5    IT6    IT10          5.0        8.0   0.20    6.3     4565     9.97     2.4%
+  IT4    IT6    IT13          5.0        8.0   1.60    6.3     7104     8.67    19.5%
+  IT4    IT6    IT12          5.0        8.0   1.60    6.3     7109     8.67    19.3%
+  IT4    IT6    IT11          5.0        8.0   1.60    6.3     7117     8.67    19.2%
+  IT4    IT6    IT10          5.0        8.0   1.60    6.3     7133     8.67    19.2%
+  IT4    IT6    IT13          5.0        8.0   0.80    6.3     7148     8.57     9.9%
+  IT4    IT6    IT12          5.0        8.0   0.80    6.3     7153     8.57     9.7%
+  IT4    IT6    IT12          5.0        8.0   0.80    1.6     7157     8.57     9.7%
+  IT4    IT6    IT11          5.0        8.0   0.80    6.3     7161     8.57     9.6%
+  IT4    IT6    IT11          5.0        8.0   0.80    1.6     7165     8.57     9.6%
+  IT4    IT6    IT10          5.0        8.0   0.80    6.3     7177     8.57     9.6%
+  IT4    IT6    IT10          5.0        8.0   0.80    1.6     7181     8.57     9.6%
+  IT4    IT6    IT13          5.0        8.0   0.40    1.6     7248     8.55     5.1%
+  IT4    IT6    IT12          5.0        8.0   0.40    1.6     7253     8.55     4.9%
+  IT4    IT6    IT11          5.0        8.0   0.40    1.6     7261     8.55     4.8%
+  IT4    IT6    IT10          5.0        8.0   0.40    1.6     7277     8.55     4.8%
+  IT4    IT6    IT13          5.0        8.0   0.20    6.3     7416     8.54     2.7%
+  IT4    IT6    IT12          5.0        8.0   0.20    6.3     7421     8.54     2.5%
+  IT4    IT6    IT11          5.0        8.0   0.20    6.3     7429     8.54     2.4%
+  IT4    IT6    IT10          5.0        8.0   0.20    6.3     7445     8.54     2.4%
+
+────────────────────────────────────────────────────────────────────────
+  RECOMMENDED TOLERANCE SPECIFICATION
+────────────────────────────────────────────────────────────────────────
+
+  Feature                             Grade      IT value   Ra [μm]  Standard
+  ───────────────────────────────────────────────────────────────────────────
+  Shaft journals (R1,R2,R3,R4)        IT5            15μm     1.60  ISO 286-1 + ISO 4288
+  Inner bore (ri)                     IT7            30μm      6.3  ISO 286-1
+  Axial lengths (L1,L2,L3,L4)         IT13          890μm        —  ISO 286-1
+  Front bearing seat  ⊕               ISO 1101     5.0μm         —  ISO 1101:2017
+  Rear bearing seats  ⊕               ISO 1101     8.0μm         —  ISO 1101:2017
+
+  Expected outcomes:
+    Machining cost   : $    4112
+    TIR runout (RSS) :   11.43 μm
+    L10 life loss    :    19.5 %
+════════════════════════════════════════════════════════════════════════
+
+
+  Deviation Pareto  [IT5, Ø90.0mm]  3 non-dominated points
+  ISO fit    Upper   Lower   TIR[μm]   Cost[$]  L10loss  Assembly
+  ────────────────────────────────────────────────────────────────────────
+  h5          -0.0    15.0     0.035      0.00     0.1%  clearance +0.0μm (slide-on, no tooling)
+  k5          +1.1    13.9     0.000      0.87    -1.6%  interference 1.1μm (arbor press) ◄ KNEE
+  m5          +5.1     9.9     0.000      4.04    -7.6%  interference 5.1μm (arbor press)
+
+════════════════════════════════════════════════════════════════════════════════
+  COMPLETE TOLERANCE SPECIFICATION — IT Grade + Optimal Deviation
+  (Multi-objective Pareto: f1=TIR f2=Assembly_cost f3=L10_loss)
+════════════════════════════════════════════════════════════════════════════════
+
+  ┌─ JOURNAL DEVIATIONS — Pareto Front  (R1,R2,R3,R4  Ø90.0mm) ───┐
+  │  IT5  IT=15μm   [3 non-dominated points]                    │
+  │  ISO fit    Upper   Lower   TIR[μm]   Cost[$]  L10loss  Assembly      │
+  │  ──────────────────────────────────────────────────────────────────────────│
+  │  h5          -0.0    15.0     0.035      0.00     0.1%          │
+  │  k5          +1.1    13.9     0.000      0.87    -1.6% ◄ KNEE ★│
+  │  m5          +5.1     9.9     0.000      4.04    -7.6%          │
+  └──────────────────────────────────────────────────────────────────────────┘
+
+  ┌─ RECOMMENDED (knee point) ────────────────────────────────────────────┐
+  │  Ø90.0mm  IT5  +1.1 / −13.9 μm  [k5]   (R1,R2,R3,R4)          │
+  │  interference 1.1μm (arbor press)                                        │
+  │  TIR from fit = 0.000 μm   Assembly = $0.87   L10 loss = -1.6%              │
+  └──────────────────────────────────────────────────────────────────────────┘
+
+  ┌─ INNER BORE ───────────────────────────────────────────────────────────┐
+  │  Ø59.1mm  IT7  +30 / 0 μm  [H7]  (ri) — H basis mandatory                  │
+  └──────────────────────────────────────────────────────────────────────────┘
+
+  ┌─ POSITIONAL TOLERANCES (ISO 1101) ────────────────────────────────────┐
+  │  Front seat:  ⊕ϕ5.0μm              (TIR contribution: 4.7 μm at amp=1.89)        │
+  │  Rear seats:  ⊕ϕ8.0μm              (TIR contribution: 2.9 μm at L_oh/L_span)       │
+  └──────────────────────────────────────────────────────────────────────────┘
+
+  Saved → rdo_results\plots\12a_pareto_3d.png
+  Saved → rdo_results\plots\12b_pareto_2d.png
+  Saved → rdo_results\plots\12c_best_tolerance.png
+Traceback (most recent call last):
+  File "f:\files\master_workflow.py", line 701, in <module>
+    main()
+  File "f:\files\master_workflow.py", line 695, in main
+    if   args.mode == "full":     orch.run_full()
+                                  ^^^^^^^^^^^^^^^
+  File "f:\files\master_workflow.py", line 621, in run_full
+    self.stage_tolerance_optimization(
+  File "f:\files\master_workflow.py", line 517, in stage_tolerance_optimization
+    w.writerow(["journals_R1R2R3R4", sp_bal.it_grade,
+                                     ^^^^^^^^^^^^^^^
+AttributeError: 'DeviationParetoPoint' object has no attribute 'it_grade'

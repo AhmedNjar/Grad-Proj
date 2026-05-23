@@ -99,10 +99,14 @@ class RobustOptimizer:
         self,
         surrogate:        SurrogateModel,
         design_space:     DesignSpace,
-        n_mc_inner:       int = 20,
+        n_mc_inner:       int   = 20,
         output_name_map:  Optional[Dict[str, str]] = None,
-        n_sa_bins:        int = 5,
-        sa_n_parts:       int = 300,
+        n_sa_bins:        int   = 5,
+        sa_n_parts:       int   = 300,
+        noise_force_cv:   float = 0.10,
+        noise_temp_max_C: float = 60.0,
+        noise_alpha_E:    float = 3.2e-4,
+        noise_alpha_sy:   float = 4.0e-4,
     ):
         self.surrogate    = surrogate
         self.design_space = design_space
@@ -110,6 +114,20 @@ class RobustOptimizer:
         self.bounds       = design_space.get_bounds()
         self.n_vars       = len(self.bounds)
         self.n_sa_bins    = n_sa_bins
+
+        # Operational noise config
+        self.noise_force_cv   = noise_force_cv
+        self.noise_temp_max_C = noise_temp_max_C
+        self.noise_alpha_E    = noise_alpha_E
+        self.noise_alpha_sy   = noise_alpha_sy
+
+        # Pre-resolve variable indices for noise injection
+        _vn = design_space.get_variable_names()
+        self._idx_E   = _vn.index("E")        if "E"        in _vn else None
+        self._idx_sy  = _vn.index("sigma_y")  if "sigma_y"  in _vn else None
+        self._idx_Ft  = _vn.index("Ft")       if "Ft"       in _vn else None
+        self._idx_Fr  = _vn.index("Fr")       if "Fr"       in _vn else None
+        self._idx_Ff  = _vn.index("Ff")       if "Ff"       in _vn else None
 
         # Cost and SA models
         self.cost_model  = SpindleCostModel()
@@ -143,8 +161,42 @@ class RobustOptimizer:
         log.info(
             f"RobustOptimizer ready  "
             f"n_vars={self.n_vars}  n_obj={self.n_objectives}  "
-            f"n_mc_inner={n_mc_inner}  sa_bins={n_sa_bins}"
+            f"n_mc_inner={n_mc_inner}  sa_bins={n_sa_bins}  "
+            f"force_CV={noise_force_cv:.0%}  ΔT_max={noise_temp_max_C:.0f}°C"
         )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Operational noise injection
+    # ─────────────────────────────────────────────────────────────────────────
+    def _apply_operational_noise(self, X: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+        """
+        Apply force scatter and thermal softening on top of manufacturing variation.
+
+        Sources:
+          • Force scatter (CV=noise_force_cv): cutting forces vary ±10% due to
+            workpiece material, tool wear, and depth-of-cut variation.
+          • Thermal E reduction (α_E=3.2e-4/°C): Young's modulus drops with
+            spindle temperature rise ΔT ~ Uniform[0, ΔT_max].
+          • Thermal σ_y reduction (α_σ=4.0e-4/°C): yield strength drops faster
+            than E with temperature (NIST data, AISI 4140 QT).
+        """
+        X_noisy = X.copy()
+        n       = len(X_noisy)
+        delta_T = rng.uniform(0.0, self.noise_temp_max_C, n)
+
+        if self._idx_E  is not None:
+            X_noisy[:, self._idx_E]  *= (1.0 - self.noise_alpha_E  * delta_T)
+        if self._idx_sy is not None:
+            X_noisy[:, self._idx_sy] *= (1.0 - self.noise_alpha_sy * delta_T)
+
+        if self.noise_force_cv > 0:
+            for idx in [self._idx_Ft, self._idx_Fr, self._idx_Ff]:
+                if idx is not None:
+                    factor = rng.normal(1.0, self.noise_force_cv, n)
+                    factor = np.clip(factor, 0.5, 2.0)
+                    X_noisy[:, idx] *= factor
+
+        return np.clip(X_noisy, self.bounds[:, 0], self.bounds[:, 1])
 
     # ─────────────────────────────────────────────────────────────────────────
     # Taguchi S/N
@@ -154,30 +206,38 @@ class RobustOptimizer:
         x_nominal: np.ndarray,
         sn_type:   Literal["smaller", "larger", "nominal"] = "smaller",
         target:    Optional[float] = None,
-        eps:       float = 1e-10,     # BUG-9 FIX guard
+        eps:       float = 1e-10,
+        seed:      Optional[int] = None,
     ) -> Dict[str, Dict[str, float]]:
         """
-        Compute S/N ratio for every surrogate output.
+        Compute Taguchi S/N ratio under combined 3-layer noise model.
 
-        Returns:
-            Dict[output_name → {"sn_ratio": float, "mean": float, "std": float}]
+        Layer 1 — Manufacturing (asymmetric ISO tolerances via sample_manufacturing_variation):
+            Correctly centres distribution at mid-band for h5/H7 etc.
+            Truncated-normal clipped to physical bounds.
+            REPLACES: x + N(0, tols/3) which was symmetric, unclipped, wrong for h5.
+
+        Layer 2 — Force scatter (noise_force_cv=10%): Ft, Fr, Ff × N(1, σ_force)
+        Layer 3 — Thermal softening: E and σ_y reduced by ΔT ~ Uniform[0, ΔT_max]
         """
-        tols  = self.design_space.get_tolerances()
-        sigma = tols / 3.0
-        lo, hi = self.bounds[:, 0], self.bounds[:, 1]
+        rng = np.random.default_rng(seed)
+        rng_seed = int(rng.integers(0, 2**31))   # derive integer seed for sample_mfg
 
-        noise = np.random.normal(0.0, sigma,
-                                 size=(self.n_mc_inner, self.n_vars))
-        X_pert = np.clip(x_nominal + noise, lo, hi)
+        # Layer 1: asymmetric ISO tolerance sampling (THE FIX)
+        X_mfg  = self.design_space.sample_manufacturing_variation(
+            x_nominal, n_samples=self.n_mc_inner, seed=rng_seed)
 
-        Y = self.surrogate.predict(X_pert)   # (n_mc_inner, n_outputs)
+        # Layers 2 & 3: operational noise
+        X_pert = self._apply_operational_noise(X_mfg, rng)
+
+        Y = self.surrogate.predict(X_pert)
 
         results: Dict[str, Dict[str, float]] = {}
         for i, name in enumerate(self.surrogate.output_names):
-            y    = Y[:, i]
-            mu   = float(np.mean(y))
-            std  = float(np.std(y))
-            y_c  = np.maximum(np.abs(y), eps)    # BUG-9 FIX
+            y   = Y[:, i]
+            mu  = float(np.mean(y))
+            std = float(np.std(y))
+            y_c = np.maximum(np.abs(y), eps)
 
             if sn_type == "smaller":
                 sn = -10.0 * np.log10(np.mean(y_c**2))

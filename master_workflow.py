@@ -96,7 +96,7 @@ def _import_all():
             try:
                 spec = importlib.util.spec_from_file_location(
                     alias,
-                    script_dir / f"{mod_name}.py",
+                    script_dir / f"{try_name}.py",
                 )
                 m = importlib.util.module_from_spec(spec)
                 sys.modules[alias] = m
@@ -176,11 +176,6 @@ class RDOMasterOrchestrator:
         df = runner.execute_batch(max_failures=10, save_interval=20)
         elapsed = time.time() - t0
 
-        # ── إضافة حماية هنا ──
-        if df.empty:
-            log.error("❌ All FEA simulation cases failed! Please check PyMAPDL configuration or ANSYS licenses.")
-            sys.exit(1)
-
         path = self.out_dir / "fea_results.csv"
         df.to_csv(path, index=False)
         log.info(f"✅ {len(df)} FEA cases in {elapsed:.1f}s → {path}")
@@ -207,8 +202,19 @@ class RDOMasterOrchestrator:
         ] if c in df.columns]
         var_cols = [c for c in df.columns if c.startswith("var_")]
 
-        X_tr = df[var_cols].values
-        y_tr = df[out_cols].values
+        X_all = df[var_cols].values
+        y_all = df[out_cols].values
+
+        # ── FIX: proper train/test split — NEVER evaluate on training data ──
+        # R²=1.0 on training data is meaningless (GP interpolates exactly).
+        # Always use a held-out test set (20%) for honest evaluation.
+        from sklearn.model_selection import train_test_split
+        n_test = max(int(len(X_all) * 0.20), 3)
+        X_tr, X_te, y_tr, y_te = train_test_split(
+            X_all, y_all, test_size=n_test,
+            random_state=42, shuffle=True,
+        )
+        log.info(f"   Train: {len(X_tr)} samples  |  Hold-out test: {len(X_te)} samples")
 
         surr = M["ml_surrogate"].SurrogateModel(
             model_type=self.config.get("surrogate", "gp")
@@ -219,17 +225,29 @@ class RDOMasterOrchestrator:
         surr.save(str(pkl_path))
         log.info(f"✅ Surrogate trained → {pkl_path}")
 
-        # Validation
-        metrics = surr.evaluate(X_tr[:10], y_tr[:10])
-        log.info(f"   CV R² per output:")
+        # ── Honest evaluation on HELD-OUT test set ───────────────────────
+        metrics = surr.evaluate(X_te, y_te)
+        log.info(f"   Hold-out test R² per output (n={len(X_te)}):")
+        low_r2_outputs = []
         for _, row in metrics.iterrows():
-            log.info(f"     {row['output']:<35} R²={row['R2']:.4f}")
+            r2    = float(row["R2"])
+            flag  = "⚠️  LOW" if r2 < 0.70 else "✅"
+            log.info(f"     {row['output']:<35} R²={r2:.4f}  {flag}")
+            if r2 < 0.70:
+                low_r2_outputs.append(row["output"])
+
+        if low_r2_outputs:
+            log.warning(
+                f"   ⚠️  {len(low_r2_outputs)} output(s) have R² < 0.70 on held-out test: "
+                f"{low_r2_outputs}\n"
+                f"   → Consider: more samples (--n_samples 200+), "
+                f"model_type=xgb, or feature engineering."
+            )
 
         if not self.config["no_plots"]:
             log.info("   Generating surrogate plots...")
-            n_te = min(20, len(X_tr) // 5)
             M["ml_surrogate"].plot_surrogate_performance(
-                surr, X_tr, y_tr, X_tr[:n_te], y_tr[:n_te],
+                surr, X_tr, y_tr, X_te, y_te,
                 save_dir=str(self.plot_dir),
             )
 
@@ -304,8 +322,164 @@ class RDOMasterOrchestrator:
                 n_bins_list=[3,5,7,10], analyser=sa_analyser,
                 save_dir=str(self.plot_dir),
             )
+            # ── SA comparison table (σ and spread before/after) ───────────
+            log.info("   Generating SA comparison table...")
+            self._plot_sa_comparison_table(sa_results, var_dict)
 
         return sa_results, costs
+
+    def _plot_sa_comparison_table(self, sa_results, var_dict: dict) -> None:
+        """Generate the SA before/after comparison table plot."""
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as mpatches
+        import numpy as np
+        import os
+
+        NAVY="#0d1b2a"; TEAL="#00b4d8"; CORAL="#e63946"
+        GOLD="#ffd166"; MINT="#06d6a0"; GRAY="#8d99ae"
+        plt.rcParams.update({
+            "figure.facecolor": NAVY, "axes.facecolor": "#112233",
+            "axes.edgecolor": GRAY, "axes.labelcolor": "white",
+            "xtick.color": GRAY, "ytick.color": GRAY,
+            "text.color": "white", "grid.color": "#2d4060",
+            "grid.alpha": 0.4, "font.size": 9,
+        })
+
+        from matplotlib.gridspec import GridSpec
+
+        en_names   = [r.interface_name.replace("_", " / ") for r in sa_results]
+        std_before = np.array([r.std_gap_no_sa_um for r in sa_results])
+        std_after  = np.array([r.std_gap_um       for r in sa_results])
+        spread_b   = std_before * 6
+        spread_a   = std_after  * 6
+        improve    = np.array([r.improvement_ratio for r in sa_results])
+        yields     = np.array([r.match_yield * 100 for r in sa_results])
+        means      = np.array([r.mean_gap_um       for r in sa_results])
+        reduc_pct  = (1 - std_after / std_before) * 100
+
+        fig = plt.figure(figsize=(16, 14), facecolor=NAVY)
+        fig.suptitle(
+            "جدول مقارنة: الانحراف المعياري وتشتت التجاوزات عند واجهات المغزل الحرجة\n"
+            "قبل وبعد تطبيق استراتيجية التجميع الانتقائي — 5 فئات",
+            color="white", fontsize=13, fontweight="bold", y=0.98,
+        )
+        gs = GridSpec(3, 2, figure=fig, hspace=0.55, wspace=0.38,
+                      top=0.91, bottom=0.06, left=0.07, right=0.97)
+        n  = len(sa_results)
+        x  = np.arange(n); w = 0.32
+
+        # ── σ bar chart ───────────────────────────────────────────────────
+        ax0 = fig.add_subplot(gs[0, 0]); ax0.set_facecolor("#112233")
+        b1 = ax0.bar(x - w/2, std_before, w, color=CORAL, edgecolor=NAVY, linewidth=0.5,
+                     label="قبل SA (Before)")
+        b2 = ax0.bar(x + w/2, std_after,  w, color=TEAL,  edgecolor=NAVY, linewidth=0.5,
+                     label="بعد SA (After 5 bins)")
+        for bar, val in zip(list(b1)+list(b2), list(std_before)+list(std_after)):
+            ax0.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.08,
+                     f"{val:.2f}", ha="center", va="bottom", fontsize=8, color="white")
+        ax0.set_xticks(x); ax0.set_xticklabels([f"I{i+1}" for i in range(n)])
+        ax0.set_ylabel("σ [μm]")
+        ax0.set_title("الانحراف المعياري σ — قبل / بعد", fontsize=10, pad=6)
+        ax0.legend(fontsize=8); ax0.grid(axis="y", alpha=0.35)
+
+        # ── 6σ spread bar chart ───────────────────────────────────────────
+        ax1 = fig.add_subplot(gs[0, 1]); ax1.set_facecolor("#112233")
+        b3 = ax1.bar(x - w/2, spread_b, w, color=CORAL, edgecolor=NAVY, linewidth=0.5)
+        b4 = ax1.bar(x + w/2, spread_a, w, color=TEAL,  edgecolor=NAVY, linewidth=0.5)
+        for bar, val in zip(list(b3)+list(b4), list(spread_b)+list(spread_a)):
+            ax1.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.2,
+                     f"{val:.1f}", ha="center", va="bottom", fontsize=8, color="white")
+        ax1.set_xticks(x); ax1.set_xticklabels([f"I{i+1}" for i in range(n)])
+        ax1.set_ylabel("6σ Spread [μm]")
+        ax1.set_title("تشتت التجاوزات (6σ) — قبل / بعد", fontsize=10, pad=6)
+        ax1.legend(handles=[mpatches.Patch(color=CORAL, label="قبل SA"),
+                             mpatches.Patch(color=TEAL,  label="بعد SA (5 bins)")],
+                   fontsize=8)
+        ax1.grid(axis="y", alpha=0.35)
+
+        # ── improvement horizontal bar ────────────────────────────────────
+        ax2 = fig.add_subplot(gs[1, 0]); ax2.set_facecolor("#112233")
+        colours_imp = [MINT if v >= 3 else GOLD for v in improve]
+        bars = ax2.barh(np.arange(n), improve, color=colours_imp,
+                        edgecolor=NAVY, linewidth=0.5, height=0.45)
+        for bar, val in zip(bars, improve):
+            ax2.text(bar.get_width()+0.05, bar.get_y()+bar.get_height()/2,
+                     f"×{val:.2f}", va="center", fontsize=9, color="white",
+                     fontweight="bold")
+        ax2.axvline(1.0, color=GRAY, lw=0.9, linestyle="--", alpha=0.6)
+        ax2.set_yticks(np.arange(n))
+        ax2.set_yticklabels([f"I{i+1}" for i in range(n)])
+        ax2.set_xlabel("نسبة التحسين ×")
+        ax2.set_title("نسبة تحسين التشتت (σ_before / σ_after)", fontsize=10, pad=6)
+        ax2.grid(axis="x", alpha=0.35)
+
+        # ── yield + reduction dual axis ───────────────────────────────────
+        ax3 = fig.add_subplot(gs[1, 1]); ax3.set_facecolor("#112233")
+        ax3b = ax3.twinx(); ax3b.set_facecolor("#112233")
+        b5 = ax3.bar(x - w/2,  yields,    w, color=GOLD, edgecolor=NAVY, linewidth=0.5,
+                     label="Yield %")
+        b6 = ax3b.bar(x + w/2, reduc_pct, w, color=MINT, edgecolor=NAVY, linewidth=0.5,
+                      label="تخفيض σ %")
+        for bar, val in zip(b5, yields):
+            ax3.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.2,
+                     f"{val:.1f}%", ha="center", va="bottom", fontsize=8, color="white")
+        for bar, val in zip(b6, reduc_pct):
+            ax3b.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.5,
+                      f"{val:.0f}%", ha="center", va="bottom", fontsize=8, color=MINT)
+        ax3.set_xticks(x); ax3.set_xticklabels([f"I{i+1}" for i in range(n)])
+        ax3.set_ylabel("Yield [%]", color=GOLD); ax3b.set_ylabel("تخفيض σ [%]", color=MINT)
+        ax3.tick_params(axis="y", colors=GOLD); ax3b.tick_params(axis="y", colors=MINT)
+        ax3.set_ylim(85, 102); ax3b.set_ylim(0, 100)
+        ax3.set_title("نسبة التطابق + نسبة تخفيض σ", fontsize=10, pad=6)
+        ax3.legend(handles=[mpatches.Patch(color=GOLD, label="Yield %"),
+                             mpatches.Patch(color=MINT, label="σ reduction %")],
+                   fontsize=8)
+
+        # ── summary table ─────────────────────────────────────────────────
+        ax4 = fig.add_subplot(gs[2, :]); ax4.axis("off")
+        cols = ["الواجهة (Interface)", "μ_gap [μm]",
+                "σ قبل SA [μm]", "σ بعد SA [μm]",
+                "6σ قبل [μm]", "6σ بعد [μm]",
+                "تخفيض σ [%]", "تحسين ×", "تطابق %", "تصنيف"]
+        rows = []
+        for i, r in enumerate(sa_results):
+            grade = ("ممتاز ✅" if improve[i] >= 4 else
+                     "جيد جداً ✅" if improve[i] >= 2.5 else "مقبول ⚠️")
+            rows.append([en_names[i], f"{means[i]:.2f}",
+                          f"{std_before[i]:.3f}", f"{std_after[i]:.3f}",
+                          f"{spread_b[i]:.2f}", f"{spread_a[i]:.2f}",
+                          f"{reduc_pct[i]:.1f}%", f"×{improve[i]:.2f}",
+                          f"{yields[i]:.1f}%", grade])
+        tbl = ax4.table(cellText=rows, colLabels=cols,
+                        cellLoc="center", loc="center", bbox=[0, 0, 1, 1])
+        tbl.auto_set_font_size(False); tbl.set_fontsize(8.5)
+        row_colours = ["#1a2c3d", "#162436"]
+        for j in range(len(cols)):
+            cell = tbl[0, j]
+            cell.set_facecolor(TEAL)
+            cell.set_text_props(color="white", fontweight="bold")
+            cell.set_edgecolor(NAVY)
+        for i, row in enumerate(rows):
+            for j in range(len(cols)):
+                cell = tbl[i+1, j]
+                cell.set_facecolor(row_colours[i % 2])
+                cell.set_edgecolor(NAVY)
+                cell.set_text_props(color="white")
+                if j == 7:   # improvement column
+                    cell.set_facecolor(MINT if improve[i] >= 4 else
+                                       GOLD if improve[i] >= 2.5 else CORAL)
+                    cell.set_text_props(color=NAVY, fontweight="bold")
+                if j == 6:
+                    cell.set_text_props(color=MINT, fontweight="bold")
+        ax4.set_title("جدول ملخص المقارنة الكاملة — الواجهات الحرجة",
+                      color="white", fontsize=10, pad=8)
+        imap = " | ".join([f"I{i+1}={nm}" for i, nm in enumerate(en_names)])
+        fig.text(0.5, 0.025, imap, ha="center", color=GRAY, fontsize=8)
+
+        p = str(self.plot_dir / "07_sa_comparison_table.png")
+        fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+        plt.close(fig)
+        log.info(f"   Saved → {p}")
 
     # ─────────────────────────────────────────────────────────────────────────
     # Stage 6 — Bearing Performance
@@ -508,31 +682,37 @@ class RDOMasterOrchestrator:
         sp_bore  = dev_result.get("inner_bore")
         sp_pf    = dev_result.get("pos_tol_front")
         sp_pr    = dev_result.get("pos_tol_rear")
+        # sp_bal is a DeviationParetoPoint — use best.it_journal for grade
         with open(tol_path, "w", newline="") as fh:
             w = csv.writer(fh)
             w.writerow(["feature","it_grade","it_value_um","upper_dev_um",
                         "lower_dev_um","iso_fit","clearance_um","tir_fit_um",
                         "assembly","standard"])
-            if sp_bal:
-                w.writerow(["journals_R1R2R3R4", sp_bal.it_grade,
-                            round(sp_bal.it_value_um,1),
-                            round(sp_bal.upper_dev_um,1), round(sp_bal.lower_dev_um,1),
-                            sp_bal.iso_fit_equiv, round(sp_bal.clearance_um,1),
-                            round(sp_bal.tir_from_fit_um,3),
+            if sp_bal:   # DeviationParetoPoint (knee point)
+                it_val = M["tolerance_optimizer"].it_value_um(
+                    best.it_journal, v["R2"] * 2)
+                w.writerow(["journals_R1R2R3R4", best.it_journal,
+                            round(it_val, 1),
+                            round(sp_bal.upper_dev_um, 1),
+                            round(sp_bal.lower_dev_um, 1),
+                            sp_bal.iso_fit,
+                            round(sp_bal.clearance_um, 1),
+                            round(sp_bal.tir_fit_um, 3),
                             sp_bal.assembly_note, "ISO 286-1"])
-            if sp_bore:
+            if sp_bore:   # OptimalDeviationSpec
                 w.writerow(["inner_bore_ri", sp_bore.it_grade,
-                            round(sp_bore.it_value_um,1),
-                            round(sp_bore.upper_dev_um,1), 0,
-                            sp_bore.iso_fit_equiv, round(sp_bore.clearance_um,1),
+                            round(sp_bore.it_value_um, 1),
+                            round(sp_bore.upper_dev_um, 1), 0,
+                            sp_bore.iso_fit_equiv,
+                            round(sp_bore.clearance_um, 1),
                             0, sp_bore.assembly_note, "ISO 286-1"])
             if sp_pf:
                 w.writerow(["pos_tol_front", "ISO 1101",
-                            round(sp_pf.it_value_um,1), "", "",
+                            round(sp_pf.it_value_um, 1), "", "",
                             sp_pf.iso_fit_equiv, "", "", "circular zone", "ISO 1101:2017"])
             if sp_pr:
                 w.writerow(["pos_tol_rear", "ISO 1101",
-                            round(sp_pr.it_value_um,1), "", "",
+                            round(sp_pr.it_value_um, 1), "", "",
                             sp_pr.iso_fit_equiv, "", "", "circular zone", "ISO 1101:2017"])
         log.info(f"   Tolerance spec saved → {tol_path}")
 
@@ -682,19 +862,27 @@ def parse_args():
     p.add_argument("--n_rpm",         type=float, default=4000.0)
     p.add_argument("--fea_csv",       default=None)
     p.add_argument("--surrogate_pkl", default=None)
+    # Noise / uncertainty CLI options (added to avoid AttributeError in main)
+    p.add_argument("--noise_force_cv",    type=float, default=0.1,
+                   help="Coefficient of variation for force noise (fraction)")
+    p.add_argument("--noise_temp_max_c",  type=float, default=60.0,
+                   help="Max temperature noise in °C")
     return p.parse_args()
 
 
 def main():
-    args = parse_args()
+    args   = parse_args()
     config = vars(args)
-    config["dry_run"] = args.dry_run   # ensure bool
+    config["dry_run"]          = args.dry_run
+    config["noise_force_cv"]   = args.noise_force_cv
+    config["noise_temp_max_c"] = args.noise_temp_max_c
 
     orch = RDOMasterOrchestrator(config)
 
-    if   args.mode == "full":     orch.run_full()
-    elif args.mode == "ml_only":  orch.run_ml_only()
-    elif args.mode == "opt_only": orch.run_opt_only()
+    if   args.mode == "full":            orch.run_full()
+    elif args.mode == "ml_only":         orch.run_ml_only()
+    elif args.mode == "from_surrogate":  orch.run_from_surrogate()
+    elif args.mode == "opt_only":        orch.run_opt_only()
 
 
 if __name__ == "__main__":
