@@ -723,7 +723,7 @@ class RDOMasterOrchestrator:
         log.info("\n── STAGE 10: FINAL ENGINEERING REPORT ──────────────────────────")
         M       = self.m
         builder = M["final_report"].FinalReportBuilder(
-            FoS_min=2.0, delta_max_um=20.0, tir_limit_um=20.0, L10_target_hours=20000,  # Option C
+            FoS_min=2.0, delta_max_um=20.0, tir_geometric_limit_um=20.0, L10_target_hours=20000,  # Option C
         )
 
         # Print to console
