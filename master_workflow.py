@@ -281,7 +281,7 @@ class RDOMasterOrchestrator:
         # Save correct CSV (catalog values, not raw optimizer)
         csv_path = self.out_dir / "optimal_design.csv"
         import csv
-        with open(csv_path, "w", newline="") as fh:
+        with open(csv_path, "w", newline="", encoding="utf-8") as fh:
             writer = csv.DictWriter(fh, fieldnames=list(mfg.keys()))
             writer.writeheader(); writer.writerow(mfg)
         log.info(f"✅ Optimal design saved → {csv_path}")
@@ -683,7 +683,7 @@ class RDOMasterOrchestrator:
         sp_pf    = dev_result.get("pos_tol_front")
         sp_pr    = dev_result.get("pos_tol_rear")
         # sp_bal is a DeviationParetoPoint — use best.it_journal for grade
-        with open(tol_path, "w", newline="") as fh:
+        with open(tol_path, "w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
             w.writerow(["feature","it_grade","it_value_um","upper_dev_um",
                         "lower_dev_um","iso_fit","clearance_um","tir_fit_um",
@@ -818,7 +818,7 @@ class RDOMasterOrchestrator:
         log.info("="*72)
 
     # ─────────────────────────────────────────────────────────────────────────
-    # ml_only — load existing FEA CSV
+    # ml_only — load existing FEA CSV and complete the full workflow
     # ─────────────────────────────────────────────────────────────────────────
     def run_ml_only(self) -> None:
         fea_csv = self.config.get("fea_csv")
@@ -828,10 +828,13 @@ class RDOMasterOrchestrator:
         df   = pd.read_csv(fea_csv)
         surr = self.stage_surrogate(df)
         self.stage_inverse_design(df)
-        self.stage_optimize(surr)
+        opt_result = self.stage_optimize(surr) # تغيير بسيط لتخزين النتيجة
+
+        # استكمال بقية المراحل الهندسية تلقائياً بناءً على التصميم الأمثل الناتج
+        self._complete_workflow_from_opt(opt_result, df)
 
     # ─────────────────────────────────────────────────────────────────────────
-    # opt_only — load pre-trained surrogate
+    # opt_only — load pre-trained surrogate and complete the full workflow
     # ─────────────────────────────────────────────────────────────────────────
     def run_opt_only(self) -> None:
         pkl = self.config.get("surrogate_pkl")
@@ -839,7 +842,58 @@ class RDOMasterOrchestrator:
             log.error(f"Surrogate pkl not found: {pkl}")
             return
         surr = self.m["ml_surrogate"].SurrogateModel.load(pkl)
-        self.stage_optimize(surr)
+        opt_result = self.stage_optimize(surr) # تغيير بسيط لتخزين النتيجة
+
+        # في نمط opt_only لا نملك الـ df بالكامل، سنمرر None لـ stage_inverse_design
+        self._complete_workflow_from_opt(opt_result, df=None)
+
+    # ── دالة مساعدة جديدة لتفادي تكرار الكود وسحب بقية مراحل الحسابات ──
+    def _complete_workflow_from_opt(self, opt_result, df=None) -> None:
+        n_rpm = float(self.config.get("n_rpm", 4000.0))
+        x_opt = opt_result.best_robust_design
+        var_d = self.ds.decode_vector(x_opt)
+
+        z_f, z_r = self.m["shaft_runout"].get_bearing_positions_from_design(var_d, self.arr)
+        span = max(z_r - z_f, 1.0)
+
+        # 5. Selective Assembly
+        self.stage_selective_assembly(var_d)
+
+        # 6. Bearing Performance
+        bearing_state = self.stage_bearing_performance(x_opt, n_rpm)
+
+        # 7. FEA single-point for reporting (نقطة واحدة سريعة جداً لا تحتاج للـ FEA pool بالكامل)
+        M = self.m
+        fea_df = M["fea_pool_runner"].FEAPoolRunner(
+            np.array([x_opt]), self.ds, dry_run=True).execute_batch()
+        fea_row = fea_df.iloc[0]
+        delta_nose_um = float(fea_row["static_max_deflection_um"])
+
+        # 8. Runout
+        runout_bd = self.stage_runout(var_d, delta_nose_um, n_rpm, z_f, z_r)
+
+        # 9. Eccentricity
+        ecc_result = self.stage_eccentricity(var_d, n_rpm, span)
+
+        # 10. Inverse design (يعمل فقط لو وفرنا الـ df)
+        if df is not None:
+            self.stage_inverse_design(df)
+
+        # 11. Tolerance Optimization ✅ (ستعمل الآن بنجاح هنا)
+        self.stage_tolerance_optimization(
+            x_opt, delta_nose_um, bearing_state.L10_system_hours, z_f, z_r,
+        )
+
+        # 12. Final report
+        self.stage_final_report(x_opt, bearing_state, runout_bd, ecc_result, fea_row, n_rpm)
+
+        # طباعة ملخص النهاية
+        plots = sorted([f for f in os.listdir(self.plot_dir) if f.endswith(".png")])
+        log.info("\n" + "="*72)
+        log.info(f"  ✅ WORKFLOW COMPLETE (Skipped initial FEA loop)")
+        log.info(f"  Output dir  : {self.out_dir}")
+        log.info(f"  Plots dir   : {self.plot_dir}")
+        log.info("="*72)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
