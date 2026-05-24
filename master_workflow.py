@@ -723,7 +723,7 @@ class RDOMasterOrchestrator:
         log.info("\n── STAGE 10: FINAL ENGINEERING REPORT ──────────────────────────")
         M       = self.m
         builder = M["final_report"].FinalReportBuilder(
-            FoS_min=2.0, delta_max_um=20.0, tir_geometric_limit_um=20.0, L10_target_hours=20000,  # Option C
+            FoS_min=2.0, delta_max_um=20.0, tir_limit_um=20.0, L10_target_hours=20000,  # Option C
         )
 
         # Print to console
@@ -739,7 +739,7 @@ class RDOMasterOrchestrator:
                                   ecc_result, fea_row, n_rpm=n_rpm,
                                   design_name="Optimised Spindle Design")
         rpt_path = self.out_dir / "optimal_design_report.txt"
-        rpt_path.write_text(buf.getvalue())
+        rpt_path.write_text(buf.getvalue(), encoding="utf-8")
         log.info(f"   Report saved → {rpt_path}")
 
         if not self.config["no_plots"]:
@@ -847,6 +847,87 @@ class RDOMasterOrchestrator:
         # في نمط opt_only لا نملك الـ df بالكامل، سنمرر None لـ stage_inverse_design
         self._complete_workflow_from_opt(opt_result, df=None)
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Custom Mode: run_from_surrogate — Full Downstream Engineering Pipeline
+    # ─────────────────────────────────────────────────────────────────────────
+    def run_from_surrogate(self) -> None:
+        log.info("🚀 Starting custom workflow: From Surrogate to Final Report...")
+
+        # 1. قراءة ملف الـ FEA CSV (مهم جداً للمرحلة التاسعة والمرحلة الثالثة إن لزم الأمر)
+        fea_csv = self.config.get("fea_csv")
+        if not fea_csv or not Path(fea_csv).exists():
+            log.error(f"❌ FEA CSV file not found at: {fea_csv}. Please provide a valid --fea_csv path.")
+            return
+        df = pd.read_csv(fea_csv)
+
+        # 2. STAGE 3: الحصول على نموذج السيروجيت (تحميل أو تدريب)
+        pkl = self.config.get("surrogate_pkl")
+        if pkl and Path(pkl).exists():
+            log.info(f"💾 Loading pre-trained surrogate model from: {pkl}")
+            surr = self.m["ml_surrogate"].SurrogateModel.load(pkl)
+        else:
+            log.info("🧠 Pre-trained surrogate PKL not found. Training a new surrogate from FEA CSV (Stage 3)...")
+            surr = self.stage_surrogate(df)
+
+        # 3. STAGE 4: Optimization (التحسين المتين)
+        log.info("🎯 Running Stage 4: Robust Design Optimization...")
+        opt_result = self.stage_optimize(surr)
+
+        x_opt = opt_result.best_robust_design
+        var_d = self.ds.decode_vector(x_opt)
+        n_rpm = float(self.config.get("n_rpm", 4000.0))
+
+        # حساب مواضع المحامل والـ Span لتمريرها للمراحل التالية
+        z_f, z_r = self.m["shaft_runout"].get_bearing_positions_from_design(var_d, self.arr)
+        span = max(z_r - z_f, 1.0)
+
+        # 4. STAGE 5: Selective Assembly (التجميع الانتقائي)
+        log.info("🔩 Running Stage 5: Selective Assembly Yield Analysis...")
+        self.stage_selective_assembly(var_d)
+
+        # 5. STAGE 6: Bearing Performance (أداء وعمر المحامل)
+        log.info("🔄 Running Stage 6: Bearing Performance & Life Analysis...")
+        bearing_state = self.stage_bearing_performance(x_opt, n_rpm)
+
+        # محاكاة سريعة جداً لنقطة التصميم الأمثل للحصول على الـ Deflection الدقيق اللازم للـ Runout والتقرير
+        log.info("🔍 Running single-point verification for the optimal design...")
+        is_dry = self.config.get("dry_run", False)
+        fea_df = self.m["fea_pool_runner"].FEAPoolRunner(
+            np.array([x_opt]), self.ds, dry_run=is_dry
+        ).execute_batch()
+        fea_row = fea_df.iloc[0]
+        delta_nose_um = float(fea_row["static_max_deflection_um"])
+
+        # 6. STAGE 7: Runout Budget Analysis
+        log.info("📐 Running Stage 7: Shaft Runout Budget Analysis...")
+        runout_bd = self.stage_runout(var_d, delta_nose_um, n_rpm, z_f, z_r)
+
+        # 7. STAGE 8: Rotor Eccentricity (اللامركزية والاتزان الديناميكي)
+        log.info("⚖️ Running Stage 8: Rotor Eccentricity & Dynamic Imbalance...")
+        ecc_result = self.stage_eccentricity(var_d, n_rpm, span)
+
+        # 8. STAGE 9: Inverse Design Verification
+        log.info("🔄 Running Stage 9: Inverse Design Mapping...")
+        self.stage_inverse_design(df)
+
+        # 9. STAGE 11: Tolerance Optimization (حساب التسامحات الأمثل)
+        log.info("📏 Running Stage 11: Optimal Tolerance Recommendations...")
+        self.stage_tolerance_optimization(
+            x_opt, delta_nose_um, bearing_state.L10_system_hours, z_f, z_r
+        )
+
+        # 10. STAGE 12: Final Engineering Report + All 33 Plots
+        log.info("📋 Running Stage 12: Generating Final Engineering Report and Plots...")
+        self.stage_final_report(x_opt, bearing_state, runout_bd, ecc_result, fea_row, n_rpm)
+
+        # طباعة ملخص النجاح النهائي في الـ Terminal
+        plots = sorted([f for f in os.listdir(self.plot_dir) if f.endswith(".png")])
+        log.info("\n" + "="*72)
+        log.info(f" 🎉 CUSTOM WORKFLOW COMPLETE (Skipped initial FEA loop successfully)")
+        log.info(f" 📊 Generated {len(plots)} Plots in directory: {self.plot_dir}")
+        log.info(f" 📂 All CSV reports saved to directory: {self.out_dir}")
+        log.info("="*72)
+    
     # ── دالة مساعدة جديدة لتفادي تكرار الكود وسحب بقية مراحل الحسابات ──
     def _complete_workflow_from_opt(self, opt_result, df=None) -> None:
         n_rpm = float(self.config.get("n_rpm", 4000.0))
@@ -906,7 +987,7 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__.split("Usage:")[1].split("Output files")[0] if "Usage:" in __doc__ else "",
     )
-    p.add_argument("--mode",          choices=["full","ml_only","opt_only"], default="full")
+    p.add_argument("--mode",          choices=["full","ml_only","opt_only", "from_surrogate"], default="full")
     p.add_argument("--n_samples",     type=int,   default=50)
     p.add_argument("--dry_run",       action="store_true")
     p.add_argument("--surrogate",     choices=["gp","xgb","mlp"], default="gp")

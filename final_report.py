@@ -266,6 +266,7 @@ class FinalReportBuilder:
     ----------
     FoS_min          : Minimum acceptable factor of safety (default 2.0)
     delta_max_um     : Maximum allowable nose deflection [μm] (default 15.0)
+    tir_limit_um     : Maximum allowable total indicator reading [μm] (default 20.0)
     L10_target_hours : Target L10 life [hours]
     """
 
@@ -273,10 +274,12 @@ class FinalReportBuilder:
         self,
         FoS_min:          float = 2.0,
         delta_max_um:     float = 20.0,    # Class B CNC lathe (ISO 230-1)
+        tir_limit_um:     float = 20.0,    # TIR loaded limit (ISO 230-1 Class B)
         L10_target_hours: float = 20_000.0,
     ):
         self.FoS_min          = FoS_min
         self.delta_max_um     = delta_max_um
+        self.tir_limit_um     = tir_limit_um
         self.L10_target_hours = L10_target_hours
 
     # ─────────────────────────────────────────────────────────────────────────

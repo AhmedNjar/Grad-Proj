@@ -1,0 +1,2 @@
+case_id,material,total_length_mm,n_nodes,n_elements,static_max_deflection_mm,static_max_deflection_um,static_max_vonmises_MPa,static_max_shear_MPa,static_factor_of_safety,modal_num_modes,modal_min_frequency_Hz,modal_max_frequency_Hz,freq_mode1_Hz,freq_mode2_Hz,freq_mode3_Hz,freq_mode4_Hz,freq_mode5_Hz,freq_mode6_Hz
+1,AISI_4140,504.0791420765861,22607,12047,0.009864,9.86,11.53,13.05,58.32,6,572.56,2231.19,572.56,1267.64,1338.29,1385.38,1795.88,2231.19
