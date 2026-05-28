@@ -300,6 +300,25 @@ class RobustOptimizer:
         snap_penalty = 500.0 * delta_bore                # USD/mm — makes
         f3 += snap_penalty                               # exact bores cheaper
 
+        # ── NEW: Engineering Constraints (Anti-Skidding & Speed Margin) ────
+        from design_variables import _ACBB_BY_BORE
+        import math
+        
+        brg = _ACBB_BY_BORE[snap_bore]
+        
+        # 1. Anti-Skidding Penalty (F_nom must be >= 15% above F_min)
+        F_nom = math.sqrt(var_dict["Ft"]**2 + var_dict["Fr"]**2)
+        F_min = 0.01 * float(brg.C_r)
+        if F_nom < (F_min * 1.15):
+            shortfall = (F_min * 1.15) - F_nom
+            f3 += 20000.0 + (shortfall * 100.0)  # Huge cost penalty to reject design
+            
+        # 2. Thermal/Speed Margin Penalty (Max grease speed must be >= 20% above operating RPM)
+        operating_rpm = 4000.0
+        if brg.n_grease < (operating_rpm * 1.20):
+            speed_deficit = (operating_rpm * 1.20) - brg.n_grease
+            f3 += 20000.0 + (speed_deficit * 10.0)  # Huge cost penalty to reject design
+
         # ── Weight proxy (f4) ──────────────────────────────────────────────
         R_vals  = [var_dict["R1"], var_dict["R2"], var_dict["R3"], var_dict["R4"]]
         L_vals  = [var_dict["L1"], var_dict["L2"], var_dict["L3"], var_dict["L4"]]

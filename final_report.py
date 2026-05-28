@@ -266,7 +266,6 @@ class FinalReportBuilder:
     ----------
     FoS_min          : Minimum acceptable factor of safety (default 2.0)
     delta_max_um     : Maximum allowable nose deflection [μm] (default 15.0)
-    tir_limit_um     : Maximum allowable total indicator reading [μm] (default 20.0)
     L10_target_hours : Target L10 life [hours]
     """
 
@@ -356,6 +355,43 @@ class FinalReportBuilder:
         print(f"  SPINDLE ENGINEERING REPORT")
         print(f"  {design_name}  |  {n_rpm:.0f} RPM")
         print(f"{'═'*70}")
+
+        # 0. Full Design Dimensions
+        print(f"\n  ─── 0. OPTIMAL DESIGN DIMENSIONS ──────────────────────────────")
+        print(f"  {'Parameter':<35} {'Value':>12}  Unit   Description")
+        print(f"  {'─'*68}")
+        dims = [
+            ("Shaft Geometry (ISO 286-1)",   None,   None,  None),
+            ("  L1 — Nose section",          v["L1"],      "mm",  "Nose to front bearing"),
+            ("  L2 — Journal section",        v["L2"],      "mm",  "Front to rear bearing span zone"),
+            ("  L3 — Drive section",          v["L3"],      "mm",  "Rear bearing to drive end"),
+            ("  L4 — Chuck flange",           v["L4"],      "mm",  "Chuck mounting face width"),
+            ("  R1 — Nose outer radius",      v["R1"],      "mm",  "Spindle nose OD/2"),
+            ("  R2 — Journal radius",         v["R2"],      "mm",  "Bearing seat OD/2"),
+            ("  R3 — Rear journal radius",    v["R3"],      "mm",  "Rear CRB seat OD/2"),
+            ("  R4 — Drive end radius",       v["R4"],      "mm",  "Drive coupling OD/2"),
+            ("  ri — Inner bore radius",      v["ri"],      "mm",  "Hollow bore radius"),
+            ("  Wall thickness",              v["R2"]-v["ri"], "mm", "At bearing seat"),
+            ("Bearing Positions",             None,   None,  None),
+            ("  Overhang (nose→front brg)",   a,            "mm",  "= L1 + f_front×L2"),
+            ("  front_z_fraction",            v["front_z_fraction"], "—", "Fraction of L2"),
+            ("  rear_z_fraction",             v["rear_z_fraction"],  "—", "Fraction of L2"),
+            ("Material Properties",           None,   None,  None),
+            ("  E — Young's modulus",         v["E"]/1e3,   "GPa", "At 20°C"),
+            ("  σ_y — Yield strength",        v["sigma_y"], "MPa", "Tensile yield"),
+            ("  ρ — Density",                 v["rho"]*1e9, "kg/m³","For imbalance calc"),
+            ("Operating Point",               None,   None,  None),
+            ("  Ft — Tangential force",       v["Ft"],      "N",   "Primary cutting force"),
+            ("  Fr — Radial force",           v["Fr"],      "N",   "Radial cutting force"),
+            ("  Ff — Feed force",             v["Ff"],      "N",   "Feed direction force"),
+            ("  F_resultant",                 math.sqrt(v["Ft"]**2+v["Fr"]**2), "N", "RSS of Ft,Fr"),
+            ("  n_rpm",                       n_rpm,        "RPM", "Operating speed"),
+        ]
+        for d in dims:
+            if d[1] is None:
+                print(f"\n  {d[0]}")
+            else:
+                print(f"  {d[0]:<35} {d[1]:>12.3f}  {d[2]:<6} {d[3]}")
 
         # 1. Catalog BOM
         print(f"\n  ─── 1. BEARING BILL OF MATERIALS (SKF Catalog) ───────────────")
@@ -497,7 +533,7 @@ class FinalReportBuilder:
         n_rpm:         float = 4000.0,
         save_dir:      str   = ".",
     ) -> None:
-        """Generate 4 final report plots."""
+        """Generate 5 final report plots (incl. spindle cross-section)."""
         import matplotlib.pyplot as plt
         import os
 
@@ -522,6 +558,11 @@ class FinalReportBuilder:
         R1, ri_v = v["R1"], v["ri"]
         L1, L2   = v["L1"], v["L2"]
         a = L1 + v["front_z_fraction"] * L2
+
+        # ── Fig 11e: Spindle cross-section (NEW) ─────────────────────────
+        p = os.path.join(save_dir, "11e_spindle_section.png")
+        plot_spindle_cross_section(v, catalog, runout_bd, fea_row, n_rpm, p)
+        print(f"  Saved → {p}")
         I_segs = [math.pi/4*(R**4-ri_v**4) for R in [v["R1"],v["R2"],v["R3"],v["R4"]]]
         L_vals = [v["L1"],v["L2"],v["L3"],v["L4"]]
         EI_eff = v["E"] * float(np.average(I_segs, weights=L_vals))
@@ -533,7 +574,7 @@ class FinalReportBuilder:
 
         # ── Fig 11a: KPI Radar ────────────────────────────────────────────
         labels = ["Deflection\n(≤15μm)", "FoS\n(≥2.0)", "L10×target",
-                  "TIR≤15μm", "Imbalance\nU/U_allow", "Force\nenvelope"]
+                  "TIR≤{:.0f}μm".format(self.tir_limit_um), "Imbalance\nU/U_allow", "Force\nenvelope"]
         scores = [
             min(self.delta_max_um / max(delta_um, 0.01), 2.0),
             min(FoS / self.FoS_min, 2.0),
@@ -639,6 +680,262 @@ class FinalReportBuilder:
         p = os.path.join(save_dir, "11d_tolerances.png")
         fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
         plt.close(fig); print(f"  Saved → {p}")
+
+
+def plot_spindle_cross_section(
+    var_dict:  dict,
+    catalog:   dict,
+    runout_bd,
+    fea_row,
+    n_rpm:     float,
+    save_path: str,
+) -> None:
+    """
+    Engineering cross-section drawing of the CNC lathe spindle.
+
+    Shows a dimensioned half-section view (matplotlib) with:
+      • Stepped hollow shaft profile (4 segments)
+      • Inner bore
+      • Front ACBB bearing (locating) + housing
+      • Rear CRB bearing × 2 (floating) + housing
+      • Dimension annotations: L1-L4, R1-R4, ri, z_front, z_rear
+      • Material/stress info box
+      • Tolerance callouts
+      • Bearing designations
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+    from matplotlib.patches import FancyArrowPatch, Arc
+    import numpy as np, os
+
+    # ── Geometry ──────────────────────────────────────────────────────────
+    v  = var_dict
+    L1, L2, L3, L4 = v["L1"], v["L2"], v["L3"], v["L4"]
+    R1, R2, R3, R4 = v["R1"], v["R2"], v["R3"], v["R4"]
+    ri = v["ri"]
+    ff = v["front_z_fraction"]
+    fr = v["rear_z_fraction"]
+
+    # z positions (nose at z=0, positive rightward to drive end)
+    z0    = 0.0
+    z1    = L1                          # nose section end
+    z2    = L1 + L2                     # journal end
+    z3    = L1 + L2 + L3               # rear section end
+    z4    = L1 + L2 + L3 + L4          # drive end
+    z_f   = L1 + ff * L2               # front bearing centre
+    z_r1  = L1 + fr * L2               # rear bearing 1 centre
+    z_r2  = z_r1 + 25.0                # rear bearing 2 centre (approx)
+
+    bf   = catalog.get("catalog_front")
+    br   = catalog.get("catalog_rear")
+    d_brg_f = float(bf.D) / 2 if bf else R2 + 30
+    B_f     = float(bf.B)    if bf else 25
+    d_brg_r = float(br.D) / 2 if br else R3 + 25
+    B_r     = float(br.B)    if br else 20
+
+    # ── Figure ────────────────────────────────────────────────────────────
+    NAVY="#0d1b2a"; STEEL="#4a6fa5"; TEAL="#00b4d8"; CORAL="#e63946"
+    GOLD="#ffd166"; GRAY="#8d99ae"; MINT="#06d6a0"; HOUSING="#6b7c93"; BORE="#1a3050"
+    BRNG_F="#00b4d8"; BRNG_R="#06d6a0"; ANNOTATION="#ffd166"
+
+    fig, ax = plt.subplots(figsize=(18, 9), facecolor=NAVY)
+    ax.set_facecolor("#0a1628")
+    ax.set_aspect("equal")
+
+    # ── Helper: draw shaft half-section (upper half, mirrored) ────────────
+    def draw_shaft():
+        # Build polygon: outer profile → inner bore (hollow) → back
+        # Outer profile segments (z, R pairs)
+        outer = [
+            (z0,  R1),                  # nose face
+            (z1,  R1),                  # end of nose → step up
+            (z1,  R2),                  # start of journal
+            (z2,  R2),                  # end of journal
+            (z2,  R3),                  # start of rear section
+            (z3,  R3),                  # end of rear section
+            (z3,  R4),                  # start of drive end
+            (z4,  R4),                  # drive end face
+            (z4, -R4),                  # mirror: drive end (bottom)
+            (z3, -R4),
+            (z3, -R3),
+            (z2, -R3),
+            (z2, -R2),
+            (z1, -R2),
+            (z1, -R1),
+            (z0, -R1),
+        ]
+        # Inner bore polygon (hollow)
+        inner = [
+            (z0,  ri), (z4,  ri),
+            (z4, -ri), (z0, -ri),
+        ]
+        xs_o = [p[0] for p in outer]; ys_o = [p[1] for p in outer]
+        xs_i = [p[0] for p in inner]; ys_i = [p[1] for p in inner]
+
+        # Fill shaft body
+        ax.fill(xs_o, ys_o, color=STEEL, alpha=0.75, zorder=2)
+        # Mask bore
+        ax.fill(xs_i, ys_i, color=BORE,  alpha=1.0,  zorder=3)
+        # Outlines
+        ax.plot(xs_o, ys_o, color="white", lw=0.9, zorder=4)
+        ax.plot(xs_i, ys_i, color="#3a6090", lw=0.7, linestyle="--", zorder=4)
+
+    def draw_bearing(zc, R_outer, B, color, label, role):
+        """Draw one bearing as a hatched rectangle pair (upper & lower)."""
+        hw = B / 2
+        for sign in [1, -1]:
+            rect = mpatches.FancyBboxPatch(
+                (zc - hw, sign * R2),
+                B, sign * (R_outer - R2),
+                boxstyle="square,pad=0",
+                facecolor=color, edgecolor="white",
+                linewidth=0.8, alpha=0.85, zorder=5,
+            )
+            ax.add_patch(rect)
+        ax.text(zc, R_outer + 4, label, ha="center", va="bottom",
+                fontsize=6.5, color=color, fontweight="bold", zorder=8)
+        ax.text(zc, -(R_outer + 7), role, ha="center", va="top",
+                fontsize=6, color=GRAY, zorder=8)
+
+    def draw_housing(zc, R_outer, B, it_grade="H6"):
+        """Draw housing bore as outer rectangle."""
+        hw    = B / 2 + 5
+        h_thk = 15   # housing wall thickness (schematic)
+        for sign in [1, -1]:
+            rect = mpatches.FancyBboxPatch(
+                (zc - hw, sign * R_outer),
+                2 * hw, sign * h_thk,
+                boxstyle="square,pad=0",
+                facecolor=HOUSING, edgecolor=GOLD,
+                linewidth=0.7, alpha=0.6, zorder=4,
+                linestyle="--",
+            )
+            ax.add_patch(rect)
+        ax.text(zc, R_outer + h_thk + 3, f"Housing {it_grade}",
+                ha="center", va="bottom", fontsize=6, color=GOLD, zorder=9)
+
+    def dim_arrow(x1, x2, y, label, color=ANNOTATION, above=True):
+        """Draw a horizontal dimension arrow with label."""
+        yo = y + (8 if above else -8)
+        ax.annotate("", xy=(x2, yo), xytext=(x1, yo),
+                    arrowprops=dict(arrowstyle="<->", color=color, lw=0.9),
+                    zorder=10)
+        ax.text((x1+x2)/2, yo + (3 if above else -4),
+                label, ha="center", va="bottom" if above else "top",
+                fontsize=6.5, color=color, zorder=11)
+        ax.plot([x1, x1], [y, yo], color=color, lw=0.5, linestyle=":", zorder=9)
+        ax.plot([x2, x2], [y, yo], color=color, lw=0.5, linestyle=":", zorder=9)
+
+    def rad_arrow(z, r, label, color=TEAL, right=True):
+        """Draw a vertical radius annotation."""
+        xo = z + (6 if right else -6)
+        ax.annotate("", xy=(xo, r), xytext=(xo, 0),
+                    arrowprops=dict(arrowstyle="-|>", color=color, lw=0.9),
+                    zorder=10)
+        ax.text(xo + (3 if right else -3), r / 2,
+                label, ha="left" if right else "right", va="center",
+                fontsize=6.5, color=color, rotation=90, zorder=11)
+
+    # ── Draw components ───────────────────────────────────────────────────
+    draw_shaft()
+
+    # Bearings
+    draw_bearing(z_f,  d_brg_f, B_f, BRNG_F,
+                 bf.designation if bf else "Front ACBB",
+                 "FRONT (locating)\nFixed outer ring")
+    draw_bearing(z_r1, d_brg_r, B_r, BRNG_R,
+                 br.designation if br else "Rear CRB 1",
+                 "REAR 1 (floating)")
+    draw_bearing(z_r2, d_brg_r, B_r, BRNG_R,
+                 br.designation if br else "Rear CRB 2",
+                 "REAR 2 (floating)")
+
+    # Housings
+    h_grade = getattr(runout_bd, "housing_it_grade", "H6") if runout_bd else "H6"
+    draw_housing(z_f,  d_brg_f, B_f, h_grade)
+    draw_housing(z_r1, d_brg_r, B_r, h_grade)
+    draw_housing(z_r2, d_brg_r, B_r, h_grade)
+
+    # Centreline
+    ax.axhline(0, color=GRAY, lw=0.8, linestyle="-.", alpha=0.6, zorder=1)
+
+    # ── Dimension arrows ─────────────────────────────────────────────────
+    y_dim = max(d_brg_f, d_brg_r) + 22
+    dim_arrow(z0,  z1,  y_dim,      f"L1={L1:.0f}mm", above=True)
+    dim_arrow(z1,  z2,  y_dim+14,   f"L2={L2:.0f}mm", above=True)
+    dim_arrow(z2,  z3,  y_dim,      f"L3={L3:.0f}mm", above=True)
+    dim_arrow(z3,  z4,  y_dim+14,   f"L4={L4:.0f}mm", above=True)
+    dim_arrow(z0,  z_f, -(y_dim),   f"Overhang={z_f:.0f}mm", above=False)
+
+    # Radius annotations
+    rad_arrow(z0+5,    R1, f"R1={R1:.1f}", TEAL,   right=True)
+    rad_arrow(z1+L2/2, R2, f"R2={R2:.1f}", TEAL,   right=True)
+    rad_arrow(z2+L3/2, R3, f"R3={R3:.1f}", MINT,   right=False)
+    rad_arrow(z3+L4/2, R4, f"R4={R4:.1f}", MINT,   right=False)
+    rad_arrow(z2-L2/4, ri, f"ri={ri:.1f}", CORAL,  right=False)
+
+    # Bearing position lines
+    for zpos, col in [(z_f, BRNG_F),(z_r1, BRNG_R),(z_r2, BRNG_R)]:
+        ax.axvline(zpos, color=col, lw=0.7, linestyle=":", alpha=0.5, zorder=1)
+
+    # ── Info box ─────────────────────────────────────────────────────────
+    fos_val   = float(fea_row["static_factor_of_safety"])
+    delta_val = float(fea_row["static_max_deflection_um"])
+    freq_val  = float(fea_row["freq_mode1_Hz"])
+    sigma_val = float(fea_row["static_max_vonmises_MPa"])
+    tir_val   = runout_bd.TIR_rss_um if runout_bd else 0.0
+
+    info_lines = [
+        f"δ_nose = {delta_val:.2f} μm",
+        f"σ_vM   = {sigma_val:.1f} MPa",
+        f"FoS    = {fos_val:.2f}",
+        f"f₁     = {freq_val:.0f} Hz",
+        f"TIR    = {tir_val:.2f} μm",
+        f"n      = {n_rpm:.0f} RPM",
+        f"Housing: {h_grade}",
+    ]
+    ax.text(z4 + 8, 0, "\n".join(info_lines),
+            va="center", ha="left", fontsize=7, color="white",
+            fontfamily="monospace",
+            bbox=dict(boxstyle="round,pad=0.5", facecolor="#112233",
+                      edgecolor=TEAL, linewidth=1.0),
+            zorder=12)
+
+    # ── Labels & title ────────────────────────────────────────────────────
+    ax.text(z0 - 5, 0, "NOSE\n(chuck)", ha="right", va="center",
+            fontsize=7, color=GOLD, fontweight="bold")
+    ax.text(z4 + 3, -R4 - 8, "DRIVE END", ha="left", va="top",
+            fontsize=7, color=GOLD)
+
+    ax.set_xlabel("Axial position z [mm]", color="white", fontsize=9)
+    ax.set_ylabel("Radial dimension [mm]", color="white", fontsize=9)
+    ax.set_title(
+        f"TechPulse Spindle — Cross-Section (Half View)\n"
+        f"Front: {bf.designation if bf else '?'}  |  "
+        f"Rear: {br.designation if br else '?'} × 2  |  "
+        f"Housing: {h_grade} (ISO 286)  |  n = {n_rpm:.0f} RPM",
+        color="white", fontsize=10, pad=10,
+    )
+    ax.set_xlim(z0 - 25, z4 + 80)
+    ax.set_ylim(-(y_dim + 30), y_dim + 30)
+    ax.tick_params(colors=GRAY)
+
+    # Legend
+    legend_handles = [
+        mpatches.Patch(color=STEEL,   label="Shaft (4140 steel)"),
+        mpatches.Patch(color=BORE,    label="Inner bore (hollow)"),
+        mpatches.Patch(color=BRNG_F,  label="Front ACBB (locating)"),
+        mpatches.Patch(color=BRNG_R,  label="Rear CRB (floating)"),
+        mpatches.Patch(color=HOUSING, label=f"Housing ({h_grade})"),
+    ]
+    ax.legend(handles=legend_handles, loc="upper left",
+              facecolor="#112233", edgecolor=GRAY,
+              labelcolor="white", fontsize=7.5)
+
+    plt.tight_layout()
+    os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+    fig.savefig(save_path, dpi=160, bbox_inches="tight", facecolor=NAVY)
+    plt.close(fig)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

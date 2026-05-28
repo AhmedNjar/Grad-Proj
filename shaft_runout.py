@@ -110,16 +110,18 @@ class RunoutBreakdown:
     TIR_elastic_um:      float
     # Source 4 — Bending slope amplification
     TIR_slope_um:        float
-    # Source 5 — Thermal differential expansion (NEW)
+    # Source 5 — Thermal differential expansion (ISO 230-3)
     TIR_thermal_um:      float
-    # Source 6 — Positional tolerance front seat (ISO 1101 ⊕) (NEW)
+    # Source 6a — Positional tolerance front seat (ISO 1101 ⊕)
     TIR_pos_front_um:    float
-    # Source 6b — Positional tolerance rear seat (tilt contribution) (NEW)
+    # Source 6b — Positional tolerance rear seat (tilt contribution)
     TIR_pos_rear_um:     float
+    # Source 7 — Housing bore eccentricity (ISO 286)
+    TIR_housing_um:      float
 
     # Combinations
-    TIR_linear_um:       float   # worst-case sum of all 6
-    TIR_rss_um:          float   # RSS of all 6
+    TIR_linear_um:       float   # worst-case sum of all 7
+    TIR_rss_um:          float   # RSS of all 7
 
     # Inputs for traceability
     delta_ir_um:          float
@@ -129,34 +131,36 @@ class RunoutBreakdown:
     precision_class:      str
     straightness_grade:   str
     ansys_deflection_um:  float
-    delta_T_C:            float   # thermal rise used
-    pos_tol_front_mm:     float   # ϕ_pos front [mm]
-    pos_tol_rear_mm:      float   # ϕ_pos rear  [mm]
+    delta_T_C:            float
+    pos_tol_front_mm:     float
+    pos_tol_rear_mm:      float
+    housing_it_grade:     str     # e.g. "H6"
+    housing_it_value_um:  float   # IT value for housing bore
 
     @property
     def TIR_geometric_um(self) -> float:
-        """All analytical sources except ANSYS (pre-FEA estimate)."""
         return math.sqrt(
             self.TIR_bearing_um**2 + self.TIR_straightness_um**2
             + self.TIR_thermal_um**2
             + self.TIR_pos_front_um**2 + self.TIR_pos_rear_um**2
+            + self.TIR_housing_um**2
         )
 
     @property
     def TIR_loaded_um(self) -> float:
-        """Full loaded TIR including ANSYS deflection (RSS)."""
         return self.TIR_rss_um
 
     @property
     def sources_dict(self) -> Dict[str, float]:
         return {
-            "Bearing (ISO 492)":  self.TIR_bearing_um,
-            "Straightness":       self.TIR_straightness_um,
-            "ANSYS deflection":   self.TIR_elastic_um,
-            "Bending slope":      self.TIR_slope_um,
-            "Thermal ΔT":         self.TIR_thermal_um,
-            "Pos.tol front":      self.TIR_pos_front_um,
-            "Pos.tol rear":       self.TIR_pos_rear_um,
+            "Bearing (ISO 492)":     self.TIR_bearing_um,
+            "Straightness":          self.TIR_straightness_um,
+            "ANSYS deflection":      self.TIR_elastic_um,
+            "Bending slope":         self.TIR_slope_um,
+            "Thermal ΔT":            self.TIR_thermal_um,
+            "Pos.tol front":         self.TIR_pos_front_um,
+            "Pos.tol rear":          self.TIR_pos_rear_um,
+            "Housing bore (ISO 286)":self.TIR_housing_um,
         }
 
 
@@ -217,7 +221,7 @@ def estimate_delta_T(
 
 class ShaftRunoutAnalyser:
     """
-    6-source shaft runout calculator including thermal and positional tolerance.
+    7-source shaft runout calculator including housing bore eccentricity.
 
     Parameters
     ----------
@@ -228,6 +232,8 @@ class ShaftRunoutAnalyser:
     cte_shaft            : CTE of shaft material [/°C]   default steel
     preload_class        : "LA" | "MA" | "HA"  for thermal model
     lubrication          : "grease" | "oil"
+    housing_it_grade     : ISO 286 IT grade for housing bore (e.g. "H6")
+                           Controls outer-ring eccentricity → TIR Source 7
     """
 
     def __init__(
@@ -235,10 +241,11 @@ class ShaftRunoutAnalyser:
         precision_class:     str   = "P5",
         straightness_grade:  str   = "precision",
         tir_geometric_limit: float = 10.0,
-        tir_loaded_limit:    float = 20.0,    # Class B CNC lathe (ISO 230-1)
+        tir_loaded_limit:    float = 20.0,
         cte_shaft:           float = CTE_STEEL_PER_C,
         preload_class:       str   = "MA",
         lubrication:         str   = "grease",
+        housing_it_grade:    str   = "H6",
     ):
         self.prec_class         = precision_class
         self.straightness_grade = straightness_grade
@@ -247,8 +254,39 @@ class ShaftRunoutAnalyser:
         self.cte_shaft          = cte_shaft
         self.preload_class      = preload_class
         self.lubrication        = lubrication
+        self.housing_it_grade   = housing_it_grade
         self.delta_ir           = BEARING_RUNOUT_UM.get(precision_class, 5.0)
         self.t_s                = SHAFT_STRAIGHTNESS_MM_PER_MM.get(straightness_grade, 1e-5)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    def _housing_tir(self, d_housing_mm: float, amp: float) -> tuple:
+        """
+        Compute TIR contribution from housing bore eccentricity.
+
+        The housing bore (IT grade H5/H6/H7) determines how accurately the
+        bearing outer ring is centred in the housing.  Any eccentricity of
+        the housing bore from the spindle centreline is amplified to the nose
+        by the same lever factor as the inner-ring runout.
+
+        Bore eccentricity from IT grade (CNC boring machine capability):
+            ε_housing ≈ IT_value / 4   [μm]   (3σ boring process capability)
+
+        IT values [μm] for housing bore diameter range 140–180 mm (ISO 286):
+            H5: IT5 = 18 μm  → ε = 4.5 μm
+            H6: IT6 = 25 μm  → ε = 6.3 μm
+            H7: IT7 = 40 μm  → ε = 10.0 μm
+
+        Returns (TIR_housing_um, it_value_um)
+        """
+        # IT values for 120–180 mm range (housing bore typically 140–165 mm)
+        _HOUSING_IT: Dict[str, float] = {
+            "H4": 12.0, "H5": 18.0, "H6": 25.0,
+            "H7": 40.0, "H8": 63.0,
+        }
+        it_val      = _HOUSING_IT.get(self.housing_it_grade, 25.0)
+        eps_housing = (it_val / 4.0) * 1e-3      # mm  (CNC boring ÷4 capability)
+        tir_housing = eps_housing * amp * 1000.0  # μm
+        return tir_housing, it_val
 
     # ─────────────────────────────────────────────────────────────────────────
     def analyse(
@@ -326,9 +364,16 @@ class ShaftRunoutAnalyser:
         e_pos_rear  = pos_rear / 2.0
         TIR_pos_rear = e_pos_rear * (L_oh / L_span) * 1000.0   # μm
 
+        # ── Source 7: Housing bore eccentricity (ISO 286 H5/H6/H7) ──────────
+        # Housing bore IT grade → eccentricity of outer ring → TIR at nose
+        # d_housing = bearing OD (D from catalog, default ~160mm for Ø90 bore)
+        d_housing = var_dict.get("R2", 50.0) * 2 + 60.0   # approx OD = bore + 60mm
+        TIR_housing, housing_it_val = self._housing_tir(d_housing, amp)
+
         # ── Combinations ──────────────────────────────────────────────────
         vals = [TIR_bearing, TIR_straight, TIR_elastic,
-                TIR_slope, TIR_thermal, TIR_pos_front, TIR_pos_rear]
+                TIR_slope, TIR_thermal, TIR_pos_front, TIR_pos_rear,
+                TIR_housing]
         TIR_linear = sum(vals)
         TIR_rss    = math.sqrt(sum(v**2 for v in vals))
 
@@ -340,6 +385,7 @@ class ShaftRunoutAnalyser:
             TIR_thermal_um      = TIR_thermal,
             TIR_pos_front_um    = TIR_pos_front,
             TIR_pos_rear_um     = TIR_pos_rear,
+            TIR_housing_um      = TIR_housing,
             TIR_linear_um       = TIR_linear,
             TIR_rss_um          = TIR_rss,
             delta_ir_um         = self.delta_ir,
@@ -352,6 +398,8 @@ class ShaftRunoutAnalyser:
             delta_T_C           = dT,
             pos_tol_front_mm    = pos_front,
             pos_tol_rear_mm     = pos_rear,
+            housing_it_grade    = self.housing_it_grade,
+            housing_it_value_um = housing_it_val,
         )
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -368,35 +416,31 @@ class ShaftRunoutAnalyser:
     # ─────────────────────────────────────────────────────────────────────────
     @staticmethod
     def print_report(bd: RunoutBreakdown, con: RunoutConstraints) -> None:
-        print(f"\n{'═'*70}")
-        print(f"  Shaft Runout Analysis  (6 sources)")
-        print(f"{'═'*70}")
-        print(f"  Bearing class  : {bd.precision_class}  "
-              f"(δ_ir = {bd.delta_ir_um:.1f} μm, ISO 492)")
-        print(f"  L_overhang     : {bd.L_overhang_mm:.1f} mm")
-        print(f"  L_span         : {bd.L_span_mm:.1f} mm")
-        print(f"  Amp factor     : {bd.amp_factor:.3f}×")
-        print(f"  Thermal ΔT     : {bd.delta_T_C:.1f} °C  (ISO 230-3 model)")
-        print(f"  pos_tol_front  : ϕ{bd.pos_tol_front_mm*1000:.0f} μm  (ISO 1101 ⊕)")
-        print(f"  pos_tol_rear   : ϕ{bd.pos_tol_rear_mm*1000:.0f} μm")
-        print(f"  {'─'*67}")
-        print(f"  {'Source':<28} {'TIR [μm]':>10}  {'% of RSS':>10}")
+        print(f"\n{'═'*72}")
+        print(f"  Shaft Runout Analysis  (8 sources incl. housing bore)")
+        print(f"{'═'*72}")
+        print(f"  Bearing class    : {bd.precision_class}  (δ_ir={bd.delta_ir_um:.1f} μm)")
+        print(f"  L_overhang       : {bd.L_overhang_mm:.1f} mm")
+        print(f"  L_span           : {bd.L_span_mm:.1f} mm")
+        print(f"  Amp factor       : {bd.amp_factor:.3f}×")
+        print(f"  Thermal ΔT       : {bd.delta_T_C:.1f} °C")
+        print(f"  pos_tol_front    : ϕ{bd.pos_tol_front_mm*1000:.0f} μm  (ISO 1101 ⊕)")
+        print(f"  pos_tol_rear     : ϕ{bd.pos_tol_rear_mm*1000:.0f} μm")
+        print(f"  Housing bore     : {bd.housing_it_grade}  IT={bd.housing_it_value_um:.0f} μm  (ISO 286)")
+        print(f"  {'─'*69}")
+        print(f"  {'Source':<30} {'TIR [μm]':>10}  {'% variance':>10}")
         rss = max(bd.TIR_rss_um, 1e-12)
         for name, val in bd.sources_dict.items():
             pct = val**2 / rss**2 * 100
-            print(f"  {name:<28} {val:>10.3f}  {pct:>9.1f}%")
-        print(f"  {'─'*67}")
-        print(f"  {'TIR linear (worst-case)':<28} {bd.TIR_linear_um:>10.3f}")
-        print(f"  {'TIR RSS (probabilistic)':<28} {bd.TIR_rss_um:>10.3f}")
-        print(f"  {'TIR geometric (pre-FEA)':<28} {bd.TIR_geometric_um:>10.3f}  "
-              f"(limit {con.limit_geometric_um} μm)")
-        print(f"  {'TIR loaded (post-FEA)':<28} {bd.TIR_loaded_um:>10.3f}  "
-              f"(limit {con.limit_loaded_um} μm)")
+            print(f"  {name:<30} {val:>10.3f}  {pct:>9.1f}%")
+        print(f"  {'─'*69}")
+        print(f"  {'TIR linear (worst-case)':<30} {bd.TIR_linear_um:>10.3f}")
+        print(f"  {'TIR RSS (probabilistic)':<30} {bd.TIR_rss_um:>10.3f}")
         print(f"\n  Constraints:")
         for nm, gi in zip(["TIR_geometric", "TIR_loaded"], con.as_array):
-            print(f"    {'✅' if gi<=0 else '❌'}  {nm:<18}  g = {gi:+.4f}")
+            print(f"    {'✅' if gi<=0 else '❌'}  {nm:<18}  g={gi:+.4f}")
         print(f"  {'ALL OK ✅' if con.all_satisfied else 'VIOLATIONS ❌'}")
-        print(f"{'═'*70}\n")
+        print(f"{'═'*72}\n")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -382,10 +382,10 @@ class DesignSpace:
         "L3": VariableBounds(24.0, 15.0, 40.0,  AsymmetricTolerance(0.100,0.000,note="spacer IT10"), "mm","Flange section length"),
         "L4": VariableBounds(15.0, 10.0, 25.0,  AsymmetricTolerance(0.500,0.000,note="IT12"), "mm","Tail section length"),
         "R1": VariableBounds(45.0, 35.0, 55.0,  AsymmetricTolerance(0.000,0.011,note="ISO h5 Ø90"), "mm","Nose outer radius"),
-        "R2": VariableBounds(50.0, 35.0, 60.0,  AsymmetricTolerance(0.000,0.013,note="ISO h5 Ø80-120"), "mm","Journal radius (bearing seat)"),
+        "R2": VariableBounds(35.0, 28.0, 37.5,  AsymmetricTolerance(0.000,0.011,note="ISO h5 Ø50-80"), "mm","Journal radius (bearing seat)"),
         "R3": VariableBounds(82.5, 70.0, 95.0,  AsymmetricTolerance(0.050,0.050,note="bilateral"), "mm","Flange outer radius"),
         "R4": VariableBounds(45.0, 35.0, 55.0,  AsymmetricTolerance(0.000,0.011,note="ISO h5 Ø90"), "mm","Tail outer radius"),
-        "ri": VariableBounds(30.0, 25.0, 35.0,  AsymmetricTolerance(0.021,0.000,note="ISO H7 Ø60"), "mm","Inner bore radius"),
+        "ri": VariableBounds(20.0, 15.0, 25.0,  AsymmetricTolerance(0.021,0.000,note="ISO H7 Ø40"), "mm","Inner bore radius"),
     })
 
     bearings: Dict[str, VariableBounds] = field(default_factory=lambda: {
