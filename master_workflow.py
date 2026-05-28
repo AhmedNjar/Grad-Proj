@@ -338,10 +338,10 @@ class RDOMasterOrchestrator:
         NAVY="#0d1b2a"; TEAL="#00b4d8"; CORAL="#e63946"
         GOLD="#ffd166"; MINT="#06d6a0"; GRAY="#8d99ae"
         plt.rcParams.update({
-            "figure.facecolor": NAVY, "axes.facecolor": "#112233",
-            "axes.edgecolor": GRAY, "axes.labelcolor": "white",
+            "figure.facecolor": "white", "axes.facecolor": "white",
+            "axes.edgecolor": GRAY, "axes.labelcolor": "navy",
             "xtick.color": GRAY, "ytick.color": GRAY,
-            "text.color": "white", "grid.color": "#2d4060",
+            "text.color": "navy", "grid.color": "#2d4060",
             "grid.alpha": 0.4, "font.size": 9,
         })
 
@@ -357,11 +357,11 @@ class RDOMasterOrchestrator:
         means      = np.array([r.mean_gap_um       for r in sa_results])
         reduc_pct  = (1 - std_after / std_before) * 100
 
-        fig = plt.figure(figsize=(16, 14), facecolor=NAVY)
+        fig = plt.figure(figsize=(16, 14), facecolor="white")
         fig.suptitle(
             "جدول مقارنة: الانحراف المعياري وتشتت التجاوزات عند واجهات المغزل الحرجة\n"
             "قبل وبعد تطبيق استراتيجية التجميع الانتقائي — 5 فئات",
-            color="white", fontsize=13, fontweight="bold", y=0.98,
+            color="navy", fontsize=13, fontweight="bold", y=0.98,
         )
         gs = GridSpec(3, 2, figure=fig, hspace=0.55, wspace=0.38,
                       top=0.91, bottom=0.06, left=0.07, right=0.97)
@@ -369,26 +369,26 @@ class RDOMasterOrchestrator:
         x  = np.arange(n); w = 0.32
 
         # ── σ bar chart ───────────────────────────────────────────────────
-        ax0 = fig.add_subplot(gs[0, 0]); ax0.set_facecolor("#112233")
+        ax0 = fig.add_subplot(gs[0, 0]); ax0.set_facecolor("white")
         b1 = ax0.bar(x - w/2, std_before, w, color=CORAL, edgecolor=NAVY, linewidth=0.5,
                      label="قبل SA (Before)")
         b2 = ax0.bar(x + w/2, std_after,  w, color=TEAL,  edgecolor=NAVY, linewidth=0.5,
                      label="بعد SA (After 5 bins)")
         for bar, val in zip(list(b1)+list(b2), list(std_before)+list(std_after)):
             ax0.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.08,
-                     f"{val:.2f}", ha="center", va="bottom", fontsize=8, color="white")
+                     f"{val:.2f}", ha="center", va="bottom", fontsize=8, color="navy")
         ax0.set_xticks(x); ax0.set_xticklabels([f"I{i+1}" for i in range(n)])
         ax0.set_ylabel("σ [μm]")
         ax0.set_title("الانحراف المعياري σ — قبل / بعد", fontsize=10, pad=6)
         ax0.legend(fontsize=8); ax0.grid(axis="y", alpha=0.35)
 
         # ── 6σ spread bar chart ───────────────────────────────────────────
-        ax1 = fig.add_subplot(gs[0, 1]); ax1.set_facecolor("#112233")
+        ax1 = fig.add_subplot(gs[0, 1]); ax1.set_facecolor("white")
         b3 = ax1.bar(x - w/2, spread_b, w, color=CORAL, edgecolor=NAVY, linewidth=0.5)
         b4 = ax1.bar(x + w/2, spread_a, w, color=TEAL,  edgecolor=NAVY, linewidth=0.5)
         for bar, val in zip(list(b3)+list(b4), list(spread_b)+list(spread_a)):
             ax1.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.2,
-                     f"{val:.1f}", ha="center", va="bottom", fontsize=8, color="white")
+                     f"{val:.1f}", ha="center", va="bottom", fontsize=8, color="navy")
         ax1.set_xticks(x); ax1.set_xticklabels([f"I{i+1}" for i in range(n)])
         ax1.set_ylabel("6σ Spread [μm]")
         ax1.set_title("تشتت التجاوزات (6σ) — قبل / بعد", fontsize=10, pad=6)
@@ -398,13 +398,13 @@ class RDOMasterOrchestrator:
         ax1.grid(axis="y", alpha=0.35)
 
         # ── improvement horizontal bar ────────────────────────────────────
-        ax2 = fig.add_subplot(gs[1, 0]); ax2.set_facecolor("#112233")
+        ax2 = fig.add_subplot(gs[1, 0]); ax2.set_facecolor("white")
         colours_imp = [MINT if v >= 3 else GOLD for v in improve]
         bars = ax2.barh(np.arange(n), improve, color=colours_imp,
                         edgecolor=NAVY, linewidth=0.5, height=0.45)
         for bar, val in zip(bars, improve):
             ax2.text(bar.get_width()+0.05, bar.get_y()+bar.get_height()/2,
-                     f"×{val:.2f}", va="center", fontsize=9, color="white",
+                     f"×{val:.2f}", va="center", fontsize=9, color="navy",
                      fontweight="bold")
         ax2.axvline(1.0, color=GRAY, lw=0.9, linestyle="--", alpha=0.6)
         ax2.set_yticks(np.arange(n))
@@ -414,15 +414,15 @@ class RDOMasterOrchestrator:
         ax2.grid(axis="x", alpha=0.35)
 
         # ── yield + reduction dual axis ───────────────────────────────────
-        ax3 = fig.add_subplot(gs[1, 1]); ax3.set_facecolor("#112233")
-        ax3b = ax3.twinx(); ax3b.set_facecolor("#112233")
+        ax3 = fig.add_subplot(gs[1, 1]); ax3.set_facecolor("white")
+        ax3b = ax3.twinx(); ax3b.set_facecolor("white")
         b5 = ax3.bar(x - w/2,  yields,    w, color=GOLD, edgecolor=NAVY, linewidth=0.5,
                      label="Yield %")
         b6 = ax3b.bar(x + w/2, reduc_pct, w, color=MINT, edgecolor=NAVY, linewidth=0.5,
                       label="تخفيض σ %")
         for bar, val in zip(b5, yields):
             ax3.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.2,
-                     f"{val:.1f}%", ha="center", va="bottom", fontsize=8, color="white")
+                     f"{val:.1f}%", ha="center", va="bottom", fontsize=8, color="navy")
         for bar, val in zip(b6, reduc_pct):
             ax3b.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.5,
                       f"{val:.0f}%", ha="center", va="bottom", fontsize=8, color=MINT)
@@ -457,14 +457,14 @@ class RDOMasterOrchestrator:
         for j in range(len(cols)):
             cell = tbl[0, j]
             cell.set_facecolor(TEAL)
-            cell.set_text_props(color="white", fontweight="bold")
+            cell.set_text_props(color="navy", fontweight="bold")
             cell.set_edgecolor(NAVY)
         for i, row in enumerate(rows):
             for j in range(len(cols)):
                 cell = tbl[i+1, j]
                 cell.set_facecolor(row_colours[i % 2])
                 cell.set_edgecolor(NAVY)
-                cell.set_text_props(color="white")
+                cell.set_text_props(color="navy")
                 if j == 7:   # improvement column
                     cell.set_facecolor(MINT if improve[i] >= 4 else
                                        GOLD if improve[i] >= 2.5 else CORAL)
@@ -472,12 +472,12 @@ class RDOMasterOrchestrator:
                 if j == 6:
                     cell.set_text_props(color=MINT, fontweight="bold")
         ax4.set_title("جدول ملخص المقارنة الكاملة — الواجهات الحرجة",
-                      color="white", fontsize=10, pad=8)
+                      color="navy", fontsize=10, pad=8)
         imap = " | ".join([f"I{i+1}={nm}" for i, nm in enumerate(en_names)])
         fig.text(0.5, 0.025, imap, ha="center", color=GRAY, fontsize=8)
 
         p = str(self.plot_dir / "07_sa_comparison_table.png")
-        fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+        fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
         plt.close(fig)
         log.info(f"   Saved → {p}")
 

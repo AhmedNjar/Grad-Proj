@@ -701,10 +701,10 @@ def plot_tolerance_pareto(
     IT_COLOURS = {"IT4": TEAL, "IT5": MINT, "IT6": GOLD, "IT7": CORAL}
     os.makedirs(save_dir, exist_ok=True)
     plt.rcParams.update({
-        "figure.facecolor": NAVY, "axes.facecolor": "#112233",
-        "axes.edgecolor": GRAY, "axes.labelcolor": "white",
+        "figure.facecolor": "white", "axes.facecolor": "white",
+        "axes.edgecolor": GRAY, "axes.labelcolor": "navy",
         "xtick.color": GRAY, "ytick.color": GRAY,
-        "text.color": "white", "grid.color": "#2d4060",
+        "text.color": "navy", "grid.color": "#2d4060",
         "grid.alpha": 0.4, "font.size": 9,
     })
 
@@ -714,9 +714,9 @@ def plot_tolerance_pareto(
     grades = [p.it_journal for p in pareto]
 
     # ── Fig 12a: 3D Pareto front ──────────────────────────────────────
-    fig = plt.figure(figsize=(10, 7), facecolor=NAVY)
+    fig = plt.figure(figsize=(10, 7), facecolor="white")
     ax  = fig.add_subplot(111, projection="3d")
-    ax.set_facecolor("#112233")
+    ax.set_facecolor("white")
     for grade in JOURNAL_GRADES:
         mask = [g == grade for g in grades]
         if not any(mask):
@@ -734,19 +734,19 @@ def plot_tolerance_pareto(
     ax.set_zlabel("L10 loss [%]", labelpad=8)
     ax.set_title("Fig 12a — Tolerance Pareto Front\n"
                  "(cost vs TIR vs L10 loss, coloured by IT_journal)",
-                 color="white", pad=12)
+                 color="navy", pad=12)
     ax.legend(fontsize=8, loc="upper left")
     ax.tick_params(colors=GRAY, labelsize=7)
     plt.tight_layout()
     p = os.path.join(save_dir, "12a_pareto_3d.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close(fig); print(f"  Saved → {p}")
 
     # ── Fig 12b: 2D projections ───────────────────────────────────────
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5), facecolor=NAVY)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5), facecolor="white")
     for ax in (ax1, ax2):
-        ax.set_facecolor("#112233")
-    fig.suptitle("Fig 12b — Tolerance Pareto 2D Projections", color="white")
+        ax.set_facecolor("white")
+    fig.suptitle("Fig 12b — Tolerance Pareto 2D Projections", color="navy")
 
     for grade in JOURNAL_GRADES:
         mask = [g == grade for g in grades]
@@ -773,14 +773,14 @@ def plot_tolerance_pareto(
 
     plt.tight_layout()
     p = os.path.join(save_dir, "12b_pareto_2d.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close(fig); print(f"  Saved → {p}")
 
     # ── Fig 12c: Best tolerance spec bar chart ────────────────────────
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5), facecolor=NAVY)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5), facecolor="white")
     for ax in (ax1, ax2):
-        ax.set_facecolor("#112233")
-    fig.suptitle("Fig 12c — Best Tolerance Specification", color="white")
+        ax.set_facecolor("white")
+    fig.suptitle("Fig 12c — Best Tolerance Specification", color="navy")
 
     # IT value comparison (tighter = shorter bar = better quality)
     d_j  = 100.0   # approximate journal diameter for display
@@ -798,7 +798,7 @@ def plot_tolerance_pareto(
     for bar, val in zip(bars, it_vals.values()):
         ax1.text(bar.get_x()+bar.get_width()/2, bar.get_height()+1,
                  f"{val:.0f}μm", ha="center", va="bottom", fontsize=8.5,
-                 color="white", fontweight="bold")
+                 color="navy", fontweight="bold")
     ax1.set_ylabel("Tolerance / IT value [μm]")
     ax1.set_title("IT Values + Positional Tolerances", fontsize=9)
     ax1.grid(axis="y", alpha=0.3)
@@ -814,7 +814,7 @@ def plot_tolerance_pareto(
     for bar, val in zip(bars2, ra_vals.values()):
         ax2.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.02,
                  f"Ra {val:.2f}μm", ha="center", va="bottom", fontsize=9,
-                 color="white", fontweight="bold")
+                 color="navy", fontweight="bold")
     ra_refs = {"N5 (0.4μm)": 0.4, "N6 (0.8μm)": 0.8, "N7 (1.6μm)": 1.6}
     for lbl, val in ra_refs.items():
         ax2.axhline(val, color=GRAY, lw=0.8, linestyle=":", alpha=0.6, label=lbl)
@@ -824,7 +824,7 @@ def plot_tolerance_pareto(
 
     plt.tight_layout()
     p = os.path.join(save_dir, "12c_best_tolerance.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close(fig); print(f"  Saved → {p}")
 
 

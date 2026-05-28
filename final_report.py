@@ -541,9 +541,9 @@ class FinalReportBuilder:
         MINT="#06d6a0"; GRAY="#8d99ae"; PURPLE="#7400b8"
         os.makedirs(save_dir, exist_ok=True)
         plt.rcParams.update({
-            "figure.facecolor": NAVY, "axes.facecolor": "#112233",
-            "axes.edgecolor": GRAY, "axes.labelcolor": "white",
-            "xtick.color": GRAY, "ytick.color": GRAY, "text.color": "white",
+            "figure.facecolor": "white", "axes.facecolor": "white",
+            "axes.edgecolor": GRAY, "axes.labelcolor": "navy",
+            "xtick.color": GRAY, "ytick.color": GRAY, "text.color": "navy",
             "grid.color": "#2d4060", "grid.alpha": 0.5, "font.size": 9,
         })
 
@@ -588,44 +588,44 @@ class FinalReportBuilder:
         sp     = scores + scores[:1]
         tgt    = [1.0] * (N+1)
 
-        fig, ax = plt.subplots(figsize=(7,7), subplot_kw={"projection":"polar"}, facecolor=NAVY)
-        ax.set_facecolor("#112233")
+        fig, ax = plt.subplots(figsize=(7,7), subplot_kw={"projection":"polar"}, facecolor="white")
+        ax.set_facecolor("white")
         ax.plot(angles, sp,  color=TEAL, lw=2, marker="o", ms=6)
         ax.fill(angles, sp,  color=TEAL, alpha=0.25)
         ax.plot(angles, tgt, color=GOLD, lw=1.5, linestyle="--", label="Target = 1.0×")
-        ax.set_xticks(angles[:-1]); ax.set_xticklabels(labels, fontsize=8, color="white")
+        ax.set_xticks(angles[:-1]); ax.set_xticklabels(labels, fontsize=8, color="navy")
         ax.set_ylim(0, 2); ax.set_yticks([0.5,1.0,1.5,2.0])
         ax.set_yticklabels(["0.5×","1.0×","1.5×","2.0×"], fontsize=7, color=GRAY)
         ax.legend(loc="upper right", bbox_to_anchor=(1.35, 1.1), fontsize=8)
-        ax.set_title("Fig 11a — KPI Radar", color="white", pad=20, fontsize=10)
+        ax.set_title("Fig 11a — KPI Radar", color="navy", pad=20, fontsize=10)
         plt.tight_layout()
         p = os.path.join(save_dir, "11a_kpi_radar.png")
-        fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+        fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
         plt.close(fig); print(f"  Saved → {p}")
 
         # ── Fig 11b: Force envelope ───────────────────────────────────────
-        fig, ax = plt.subplots(figsize=(9,5), facecolor=NAVY)
-        ax.set_facecolor("#112233")
+        fig, ax = plt.subplots(figsize=(9,5), facecolor="white")
+        ax.set_facecolor("white")
         ax.barh(["F_min (brg load)", "F_nominal", "F_max (δ≤15μm)"],
                 [F_min_N, F_nom_N, F_max_N],
                 color=[CORAL, TEAL, GOLD], edgecolor=NAVY, height=0.4)
         for val, y in zip([F_min_N, F_nom_N, F_max_N], range(3)):
-            ax.text(val + 20, y, f"{val:.0f} N", va="center", fontsize=9, color="white")
+            ax.text(val + 20, y, f"{val:.0f} N", va="center", fontsize=9, color="navy")
         ax.axvline(F_nom_N, color=TEAL, lw=1.5, linestyle="--", alpha=0.6)
         ax.set_xlabel("Force [N]")
         ax.set_title("Fig 11b — Cutting Force Envelope\n"
                      f"Safe zone: {F_min_N:.0f} – {F_max_N:.0f} N  |  "
                      f"Active limit: {'deflection' if F_max_defl<F_max_stress else 'stress'}",
-                     color="white")
+                     color="navy")
         ax.grid(axis="x", alpha=0.3)
         plt.tight_layout()
         p = os.path.join(save_dir, "11b_force_envelope.png")
-        fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+        fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
         plt.close(fig); print(f"  Saved → {p}")
 
         # ── Fig 11c: Runout waterfall ─────────────────────────────────────
-        fig, ax = plt.subplots(figsize=(10,5), facecolor=NAVY)
-        ax.set_facecolor("#112233")
+        fig, ax = plt.subplots(figsize=(10,5), facecolor="white")
+        ax.set_facecolor("white")
         src_items = list(runout_bd.sources_dict.items())
         cumul = 0.0
         cols  = [TEAL, CORAL, GOLD, MINT, PURPLE, "#ff9f1c", GRAY]
@@ -634,29 +634,29 @@ class FinalReportBuilder:
                    edgecolor=NAVY, linewidth=0.5, width=0.55)
             if val > 0.05:
                 ax.text(i, cumul+val/2, f"{val:.2f}μm", ha="center", va="center",
-                        fontsize=8, color="white", fontweight="bold")
+                        fontsize=8, color="navy", fontweight="bold")
             cumul += val
         ax.bar(len(src_items), runout_bd.TIR_rss_um, color=PURPLE,
                edgecolor=NAVY, linewidth=0.5, width=0.55)
         ax.text(len(src_items), runout_bd.TIR_rss_um/2,
                 f"{runout_bd.TIR_rss_um:.2f}μm", ha="center", va="center",
-                fontsize=9, color="white", fontweight="bold")
+                fontsize=9, color="navy", fontweight="bold")
         ax.axhline(self.tir_limit_um, color=CORAL, lw=1.5, linestyle="--", label=f"{self.tir_limit_um:.0f} μm limit (ISO 230-1 Class B)")
         xlabels = [s.replace(" (ISO 492)","").replace(" (ISO 230-3)","")
                    .replace(" (ISO 1101)","") for s,_ in src_items] + ["TIR RSS"]
         ax.set_xticks(range(len(xlabels))); ax.set_xticklabels(xlabels, fontsize=8)
         ax.set_ylabel("TIR [μm]"); ax.legend(fontsize=8)
-        ax.set_title("Fig 11c — Runout Budget Waterfall", color="white")
+        ax.set_title("Fig 11c — Runout Budget Waterfall", color="navy")
         ax.grid(axis="y", alpha=0.3)
         plt.tight_layout()
         p = os.path.join(save_dir, "11c_runout_waterfall.png")
-        fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+        fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
         plt.close(fig); print(f"  Saved → {p}")
 
         # ── Fig 11d: Tolerance recommendations ───────────────────────────
         tols = recommend_tolerances(v)
-        fig, ax = plt.subplots(figsize=(12,6), facecolor=NAVY)
-        ax.set_facecolor("#112233")
+        fig, ax = plt.subplots(figsize=(12,6), facecolor="white")
+        ax.set_facecolor("white")
         y_pos  = np.arange(len(tols))
         upper  = [t.upper_dev_mm*1000 for t in tols]
         lower  = [t.lower_dev_mm*1000 for t in tols]
@@ -665,20 +665,20 @@ class FinalReportBuilder:
         ax.barh(y_pos + 0.18, lower, height=0.32, color=CORAL, label="−lower dev [μm]", edgecolor=NAVY)
         for i, t in enumerate(tols):
             ax.text(max(t.upper_dev_mm*1000, 0)+0.1, i-0.18,
-                    f"{t.upper_dev_mm*1000:.1f}μm", va="center", fontsize=7.5, color="white")
+                    f"{t.upper_dev_mm*1000:.1f}μm", va="center", fontsize=7.5, color="navy")
             if t.lower_dev_mm > 0:
                 ax.text(t.lower_dev_mm*1000+0.1, i+0.18,
-                        f"{t.lower_dev_mm*1000:.1f}μm", va="center", fontsize=7.5, color="white")
+                        f"{t.lower_dev_mm*1000:.1f}μm", va="center", fontsize=7.5, color="navy")
         ax.set_yticks(y_pos); ax.set_yticklabels([f"{t.feature}  [{t.iso_fit}]"
                                                     for t in tols], fontsize=8)
         ax.set_xlabel("Tolerance deviation [μm]")
         ax.set_title("Fig 11d — Recommended Tolerance Specification (ISO 286/1101/492)",
-                     color="white")
+                     color="navy")
         ax.legend(fontsize=8); ax.grid(axis="x", alpha=0.3)
         ax.set_xscale("log"); ax.set_xlim(left=0.5)
         plt.tight_layout()
         p = os.path.join(save_dir, "11d_tolerances.png")
-        fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+        fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
         plt.close(fig); print(f"  Saved → {p}")
 
 
@@ -738,7 +738,7 @@ def plot_spindle_cross_section(
     GOLD="#ffd166"; GRAY="#8d99ae"; MINT="#06d6a0"; HOUSING="#6b7c93"; BORE="#1a3050"
     BRNG_F="#00b4d8"; BRNG_R="#06d6a0"; ANNOTATION="#ffd166"
 
-    fig, ax = plt.subplots(figsize=(18, 9), facecolor=NAVY)
+    fig, ax = plt.subplots(figsize=(18, 9), facecolor="white")
     ax.set_facecolor("#0a1628")
     ax.set_aspect("equal")
 
@@ -777,7 +777,7 @@ def plot_spindle_cross_section(
         # Mask bore
         ax.fill(xs_i, ys_i, color=BORE,  alpha=1.0,  zorder=3)
         # Outlines
-        ax.plot(xs_o, ys_o, color="white", lw=0.9, zorder=4)
+        ax.plot(xs_o, ys_o, color="navy", lw=0.9, zorder=4)
         ax.plot(xs_i, ys_i, color="#3a6090", lw=0.7, linestyle="--", zorder=4)
 
     def draw_bearing(zc, R_outer, B, color, label, role):
@@ -788,7 +788,7 @@ def plot_spindle_cross_section(
                 (zc - hw, sign * R2),
                 B, sign * (R_outer - R2),
                 boxstyle="square,pad=0",
-                facecolor=color, edgecolor="white",
+                facecolor=color, edgecolor="navy",
                 linewidth=0.8, alpha=0.85, zorder=5,
             )
             ax.add_patch(rect)
@@ -895,9 +895,9 @@ def plot_spindle_cross_section(
         f"Housing: {h_grade}",
     ]
     ax.text(z4 + 8, 0, "\n".join(info_lines),
-            va="center", ha="left", fontsize=7, color="white",
+            va="center", ha="left", fontsize=7, color="navy",
             fontfamily="monospace",
-            bbox=dict(boxstyle="round,pad=0.5", facecolor="#112233",
+            bbox=dict(boxstyle="round,pad=0.5", facecolor="navy",
                       edgecolor=TEAL, linewidth=1.0),
             zorder=12)
 
@@ -907,14 +907,14 @@ def plot_spindle_cross_section(
     ax.text(z4 + 3, -R4 - 8, "DRIVE END", ha="left", va="top",
             fontsize=7, color=GOLD)
 
-    ax.set_xlabel("Axial position z [mm]", color="white", fontsize=9)
-    ax.set_ylabel("Radial dimension [mm]", color="white", fontsize=9)
+    ax.set_xlabel("Axial position z [mm]", color="navy", fontsize=9)
+    ax.set_ylabel("Radial dimension [mm]", color="navy", fontsize=9)
     ax.set_title(
         f"TechPulse Spindle — Cross-Section (Half View)\n"
         f"Front: {bf.designation if bf else '?'}  |  "
         f"Rear: {br.designation if br else '?'} × 2  |  "
         f"Housing: {h_grade} (ISO 286)  |  n = {n_rpm:.0f} RPM",
-        color="white", fontsize=10, pad=10,
+        color="navy", fontsize=10, pad=10,
     )
     ax.set_xlim(z0 - 25, z4 + 80)
     ax.set_ylim(-(y_dim + 30), y_dim + 30)
@@ -929,12 +929,12 @@ def plot_spindle_cross_section(
         mpatches.Patch(color=HOUSING, label=f"Housing ({h_grade})"),
     ]
     ax.legend(handles=legend_handles, loc="upper left",
-              facecolor="#112233", edgecolor=GRAY,
-              labelcolor="white", fontsize=7.5)
+              facecolor="navy", edgecolor=GRAY,
+              labelcolor="navy", fontsize=7.5)
 
     plt.tight_layout()
     os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
-    fig.savefig(save_path, dpi=160, bbox_inches="tight", facecolor=NAVY)
+    fig.savefig(save_path, dpi=160, bbox_inches="tight", facecolor="white")
     plt.close(fig)
 
 
@@ -951,13 +951,13 @@ if __name__ == "__main__":
         m = importlib.util.module_from_spec(spec); sys.modules[name] = m
         spec.loader.exec_module(m); return m
 
-    load('design_variables',    './01_design_variables.py')
-    load('lhs_sampler',         './02_lhs_sampler.py')
-    load('fea_pool_runner',     './03_fea_pool_runner.py')
-    load('selective_assembly',  './07_selective_assembly.py')
-    load('bearing_performance', './08_bearing_performance.py')
-    load('shaft_runout',        './09_shaft_runout.py')
-    load('rotor_eccentricity',  './10_rotor_eccentricity.py')
+    load('design_variables',    'design_variables.py')
+    load('lhs_sampler',         'lhs_sampler.py')
+    load('fea_pool_runner',     'fea_pool_runner.py')
+    load('selective_assembly',  'selective_assembly.py')
+    load('bearing_performance', 'bearing_performance.py')
+    load('shaft_runout',        'shaft_runout.py')
+    load('rotor_eccentricity',  'rotor_eccentricity.py')
 
     from design_variables    import DesignSpace, SpindleBearingArrangement
     from fea_pool_runner     import FEAPoolRunner

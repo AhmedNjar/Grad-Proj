@@ -566,10 +566,10 @@ def plot_selective_assembly(
     MINT="#06d6a0"; GRAY="#8d99ae"; PURPLE="#7400b8"
     os.makedirs(save_dir, exist_ok=True)
     plt.rcParams.update({
-        "figure.facecolor": NAVY, "axes.facecolor": "#112233",
-        "axes.edgecolor": GRAY, "axes.labelcolor": "white",
+        "figure.facecolor": "white", "axes.facecolor": "white",
+        "axes.edgecolor": GRAY, "axes.labelcolor": "navy",
         "xtick.color": GRAY, "ytick.color": GRAY,
-        "text.color": "white", "grid.color": "#2d4060",
+        "text.color": "navy", "grid.color": "#2d4060",
         "grid.alpha": 0.4, "font.size": 9,
     })
     if n_bins_list is None:
@@ -579,15 +579,15 @@ def plot_selective_assembly(
 
     # ── Fig 07a: Gap distributions before/after SA ────────────────────
     n_intf = len(sa_results)
-    fig, axes = plt.subplots(n_intf, 2, figsize=(12, 4 * n_intf), facecolor=NAVY)
+    fig, axes = plt.subplots(n_intf, 2, figsize=(12, 4 * n_intf), facecolor="white")
     if n_intf == 1:
         axes = [axes]
     fig.suptitle("Fig 07a — Gap Distributions Before/After Selective Assembly",
-                 color="white", y=1.01)
+                 color="navy", y=1.01)
     for row_axes, res, col in zip(axes, sa_results, SEG_COLS):
         ax_before, ax_after = row_axes[0], row_axes[1]
         for ax in (ax_before, ax_after):
-            ax.set_facecolor("#112233")
+            ax.set_facecolor("white")
         σ_before = res.std_gap_no_sa_um
         σ_after  = res.std_gap_um
         μ        = res.mean_gap_um
@@ -611,14 +611,14 @@ def plot_selective_assembly(
             ax.set_xlabel("Gap [μm]"); ax.set_ylabel("Count")
     plt.tight_layout()
     p = os.path.join(save_dir, "07a_sa_gap_distribution.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close(fig); print(f"  Saved → {p}")
 
     # ── Fig 07b: Cost breakdown ───────────────────────────────────────
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5), facecolor=NAVY)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5), facecolor="white")
     for ax in (ax1, ax2):
-        ax.set_facecolor("#112233")
-    fig.suptitle("Fig 07b — Cost Breakdown", color="white")
+        ax.set_facecolor("white")
+    fig.suptitle("Fig 07b — Cost Breakdown", color="navy")
 
     cost_keys = ["material_usd", "machining_usd", "bearings_usd", "sa_usd"]
     cost_labels = ["Material", "Machining", "Bearings", "SA"]
@@ -632,20 +632,20 @@ def plot_selective_assembly(
     )
     for at in autos:
         at.set_color("white")
-    ax1.set_facecolor(NAVY)
+    ax1.set_facecolor("white")
     ax1.set_title(f"Total = ${costs.get('total_usd', sum(cost_vals)):.2f}", fontsize=9)
 
     # Bar chart of cost components
     ax2.bar(cost_labels, cost_vals, color=cost_colours, edgecolor=NAVY, linewidth=0.5)
     for i, v in enumerate(cost_vals):
         ax2.text(i, v + costs.get("total_usd", 1) * 0.01,
-                 f"${v:.1f}", ha="center", fontsize=8.5, color="white")
+                 f"${v:.1f}", ha="center", fontsize=8.5, color="navy")
     ax2.set_ylabel("Cost [USD]")
     ax2.set_title("Cost Components", fontsize=9)
     ax2.grid(axis="y", alpha=0.3)
     plt.tight_layout()
     p = os.path.join(save_dir, "07b_cost_breakdown.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close(fig); print(f"  Saved → {p}")
 
     # ── Fig 07c: Improvement ratio and yield vs. n_bins ───────────────
@@ -658,10 +658,10 @@ def plot_selective_assembly(
                 improve_per_bins[nb].append(r.improvement_ratio)
                 yield_per_bins[nb].append(r.match_yield * 100)
 
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 5), facecolor=NAVY)
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 5), facecolor="white")
         for ax in (ax1, ax2):
-            ax.set_facecolor("#112233")
-        fig.suptitle("Fig 07c — SA Performance vs. Number of Bins", color="white")
+            ax.set_facecolor("white")
+        fig.suptitle("Fig 07c — SA Performance vs. Number of Bins", color="navy")
 
         for j, res in enumerate(sa_results):
             iname = res.interface_name[:20]
@@ -684,7 +684,7 @@ def plot_selective_assembly(
 
         plt.tight_layout()
         p = os.path.join(save_dir, "07c_sa_vs_bins.png")
-        fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+        fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
         plt.close(fig); print(f"  Saved → {p}")
 
 

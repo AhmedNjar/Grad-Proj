@@ -327,9 +327,9 @@ def plot_fea_results(
     MINT="#06d6a0"; GRAY="#8d99ae"
     os.makedirs(save_dir, exist_ok=True)
     plt.rcParams.update({
-        "figure.facecolor": NAVY, "axes.facecolor": "#112233",
-        "axes.edgecolor": GRAY, "axes.labelcolor": "white",
-        "xtick.color": GRAY, "ytick.color": GRAY, "text.color": "white",
+        "figure.facecolor": "white", "axes.facecolor": "white",
+        "axes.edgecolor": GRAY, "axes.labelcolor": "navy",
+        "xtick.color": GRAY, "ytick.color": GRAY, "text.color": "navy",
         "grid.color": "#2d4060", "grid.alpha": 0.4, "font.size": 9,
     })
 
@@ -340,31 +340,31 @@ def plot_fea_results(
         "static_factor_of_safety":  ("Factor of Safety", GOLD),
         "freq_mode1_Hz":            ("1st Freq [Hz]",   MINT),
     }
-    fig, axes = plt.subplots(2, 2, figsize=(11, 7), facecolor=NAVY)
-    fig.suptitle("Fig 03a — FEA Output Distributions", color="white", y=1.01)
+    fig, axes = plt.subplots(2, 2, figsize=(11, 7), facecolor="white")
+    fig.suptitle("Fig 03a — FEA Output Distributions", color="navy", y=1.01)
     for ax, (col, (label, colour)) in zip(axes.flat, outputs.items()):
         if col not in df.columns:
             continue
         data = df[col].dropna()
-        ax.set_facecolor("#112233")
+        ax.set_facecolor("white")
         ax.hist(data, bins=min(20, len(data)//2+1), color=colour, edgecolor=NAVY, alpha=0.85)
         ax.axvline(data.mean(), color=GOLD, lw=1.5, linestyle="--",
                    label=f"μ={data.mean():.2f}")
-        ax.axvline(data.median(), color="white", lw=1.0, linestyle=":",
+        ax.axvline(data.median(), color="navy", lw=1.0, linestyle=":",
                    label=f"med={data.median():.2f}")
         ax.set_xlabel(label); ax.legend(fontsize=7.5)
         ax.set_title(label, fontsize=9)
     plt.tight_layout()
     p = os.path.join(save_dir, "03a_fea_distributions.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY); plt.close(fig)
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white"); plt.close(fig)
     print(f"  Saved → {p}")
 
     # Fig 03b: Deflection sensitivity
-    fig, axes = plt.subplots(1, 2, figsize=(11, 5), facecolor=NAVY)
-    fig.suptitle("Fig 03b — Deflection Sensitivity", color="white")
+    fig, axes = plt.subplots(1, 2, figsize=(11, 5), facecolor="white")
+    fig.suptitle("Fig 03b — Deflection Sensitivity", color="navy")
     defl = df["static_max_deflection_um"].values
     for ax, var_nm, col in zip(axes, ["R2","L1"], [TEAL, CORAL]):
-        ax.set_facecolor("#112233")
+        ax.set_facecolor("white")
         cname = f"var_{var_nm}"
         if cname not in df.columns:
             continue
@@ -379,14 +379,14 @@ def plot_fea_results(
         ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
     plt.tight_layout()
     p = os.path.join(save_dir, "03b_deflection_sensitivity.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY); plt.close(fig)
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white"); plt.close(fig)
     print(f"  Saved → {p}")
 
     # Fig 03c: Frequency vs L2 + FoS histogram
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 5), facecolor=NAVY)
-    fig.suptitle("Fig 03c — Frequency & Safety Factor", color="white")
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 5), facecolor="white")
+    fig.suptitle("Fig 03c — Frequency & Safety Factor", color="navy")
     for ax in (ax1, ax2):
-        ax.set_facecolor("#112233")
+        ax.set_facecolor("white")
     if "var_L2" in df.columns:
         ax1.scatter(df["var_L2"], df["freq_mode1_Hz"], s=18, c=MINT, alpha=0.65)
         z2 = np.polyfit(df["var_L2"], df["freq_mode1_Hz"], 1)
@@ -399,12 +399,12 @@ def plot_fea_results(
     fos = df["static_factor_of_safety"].values
     ax2.hist(fos, bins=min(20, len(fos)//2+1), color=GOLD, edgecolor=NAVY, alpha=0.85)
     ax2.axvline(2.0, color=CORAL, lw=1.5, linestyle="--", label="FoS min = 2.0")
-    ax2.axvline(fos.mean(), color="white", lw=1.0, linestyle=":", label=f"μ={fos.mean():.1f}")
+    ax2.axvline(fos.mean(), color="navy", lw=1.0, linestyle=":", label=f"μ={fos.mean():.1f}")
     ax2.set_xlabel("Factor of Safety"); ax2.legend(fontsize=8)
     ax2.set_title("FoS Distribution", fontsize=9); ax2.grid(axis="y", alpha=0.3)
     plt.tight_layout()
     p = os.path.join(save_dir, "03c_frequency_fos.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY); plt.close(fig)
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white"); plt.close(fig)
     print(f"  Saved → {p}")
 
 
@@ -417,34 +417,34 @@ def plot_fea_results(df, ds, save_dir="."):
     import matplotlib.pyplot as plt, os
     NAVY="#0d1b2a"; TEAL="#00b4d8"; CORAL="#e63946"; GOLD="#ffd166"; MINT="#06d6a0"; GRAY="#8d99ae"
     os.makedirs(save_dir, exist_ok=True)
-    plt.rcParams.update({"figure.facecolor":NAVY,"axes.facecolor":"#112233",
-        "axes.edgecolor":GRAY,"axes.labelcolor":"white","xtick.color":GRAY,
-        "ytick.color":GRAY,"text.color":"white","grid.color":"#2d4060","grid.alpha":0.4,"font.size":9})
+    plt.rcParams.update({"figure.facecolor": "white","axes.facecolor": "white",
+        "axes.edgecolor":GRAY,"axes.labelcolor": "navy","xtick.color":GRAY,
+        "ytick.color":GRAY,"text.color": "navy","grid.color":"#2d4060","grid.alpha":0.4,"font.size":9})
 
     # 03a: output distributions
     outputs = {"static_max_deflection_um":("Deflection [μm]",TEAL),
                "static_max_vonmises_MPa":("Stress [MPa]",CORAL),
                "static_factor_of_safety":("FoS",GOLD),
                "freq_mode1_Hz":("f1 [Hz]",MINT)}
-    fig, axes = plt.subplots(2, 2, figsize=(11,7), facecolor=NAVY)
-    fig.suptitle("Fig 03a — FEA Batch Output Distributions", color="white", y=1.01)
+    fig, axes = plt.subplots(2, 2, figsize=(11,7), facecolor="white")
+    fig.suptitle("Fig 03a — FEA Batch Output Distributions", color="navy", y=1.01)
     for ax,(col,(lbl,colour)) in zip(axes.flat, outputs.items()):
         if col not in df.columns: continue
-        data=df[col].dropna(); ax.set_facecolor("#112233")
+        data=df[col].dropna(); ax.set_facecolor("white")
         ax.hist(data, bins=min(20,max(3,len(data)//2+1)), color=colour, edgecolor=NAVY, alpha=0.85)
         ax.axvline(data.mean(), color=GOLD, lw=1.5, linestyle="--", label=f"μ={data.mean():.2f}")
-        ax.axvline(data.median(), color="white", lw=1.0, linestyle=":", label=f"med={data.median():.2f}")
+        ax.axvline(data.median(), color="navy", lw=1.0, linestyle=":", label=f"med={data.median():.2f}")
         ax.set_xlabel(lbl); ax.legend(fontsize=7.5)
     plt.tight_layout()
     p=os.path.join(save_dir,"03a_fea_distributions.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY); plt.close(fig); print(f"  Saved → {p}")
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white"); plt.close(fig); print(f"  Saved → {p}")
 
     # 03b: deflection vs R2, L1
-    fig, axes = plt.subplots(1,2,figsize=(11,5), facecolor=NAVY)
-    fig.suptitle("Fig 03b — Deflection Sensitivity", color="white")
+    fig, axes = plt.subplots(1,2,figsize=(11,5), facecolor="white")
+    fig.suptitle("Fig 03b — Deflection Sensitivity", color="navy")
     defl=df["static_max_deflection_um"].values
     for ax, vn, col in zip(axes, ["R2","L1"], [TEAL,CORAL]):
-        ax.set_facecolor("#112233")
+        ax.set_facecolor("white")
         cn=f"var_{vn}"
         if cn not in df.columns: continue
         xd=df[cn].values; ax.scatter(xd, defl, s=16, c=col, alpha=0.65, edgecolors="none")
@@ -454,12 +454,12 @@ def plot_fea_results(df, ds, save_dir="."):
         ax.set_title(f"δ vs {vn}"); ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
     plt.tight_layout()
     p=os.path.join(save_dir,"03b_deflection_sensitivity.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY); plt.close(fig); print(f"  Saved → {p}")
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white"); plt.close(fig); print(f"  Saved → {p}")
 
     # 03c: freq vs L2 + FoS histogram
-    fig,(ax1,ax2) = plt.subplots(1,2,figsize=(11,5), facecolor=NAVY)
-    fig.suptitle("Fig 03c — Frequency vs L2 & FoS", color="white")
-    for ax in (ax1,ax2): ax.set_facecolor("#112233")
+    fig,(ax1,ax2) = plt.subplots(1,2,figsize=(11,5), facecolor="white")
+    fig.suptitle("Fig 03c — Frequency vs L2 & FoS", color="navy")
+    for ax in (ax1,ax2): ax.set_facecolor("white")
     if "var_L2" in df.columns:
         ax1.scatter(df["var_L2"], df["freq_mode1_Hz"], s=16, c=MINT, alpha=0.65, edgecolors="none")
         z2=np.polyfit(df["var_L2"],df["freq_mode1_Hz"],1)
@@ -472,7 +472,7 @@ def plot_fea_results(df, ds, save_dir="."):
     ax2.set_xlabel("Factor of Safety"); ax2.legend(fontsize=8); ax2.grid(axis="y", alpha=0.3)
     plt.tight_layout()
     p=os.path.join(save_dir,"03c_frequency_fos.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY); plt.close(fig); print(f"  Saved → {p}")
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white"); plt.close(fig); print(f"  Saved → {p}")
 
 
 

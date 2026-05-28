@@ -633,10 +633,10 @@ def plot_design_space(ds: DesignSpace, save_dir: str = ".") -> List:
     GOLD  = "#ffd166"
     GRAY  = "#8d99ae"
     plt.rcParams.update({
-        "figure.facecolor": NAVY, "axes.facecolor": "#112233",
-        "axes.edgecolor": GRAY, "axes.labelcolor": "white",
-        "xtick.color": GRAY, "ytick.color": GRAY,
-        "text.color": "white", "grid.color": "#2d4060",
+        "figure.facecolor": "white", "axes.facecolor": "white",
+        "axes.edgecolor": NAVY, "axes.labelcolor": NAVY,
+        "xtick.color": NAVY, "ytick.color": NAVY,
+        "text.color": NAVY, "grid.color": "#2d4060",
         "grid.alpha": 0.5, "font.size": 9,
     })
 
@@ -651,14 +651,14 @@ def plot_design_space(ds: DesignSpace, save_dir: str = ".") -> List:
 
     # ── Fig 1: Normalised search range width ─────────────────────────────
     fig1, ax1 = plt.subplots(figsize=(12, 7))
-    fig1.patch.set_facecolor(NAVY)
+    fig1.patch.set_facecolor("white")
     widths = (bounds[:, 1] - bounds[:, 0]) / np.maximum(np.abs(nom), 1e-12) * 100
     colours = [TEAL if "pos_tol" not in n else GOLD for n in names]
     bars = ax1.barh(names, widths, color=colours, edgecolor=NAVY, linewidth=0.4)
     ax1.set_xlabel("Search range / |nominal|  [%]")
     ax1.set_title("Fig 1 — Design Variable Search Range (Normalised)", pad=10)
     ax1.axvline(20, color=GRAY, linestyle="--", linewidth=0.8, alpha=0.7)
-    ax1.text(20.5, -0.5, "20%", color=GRAY, fontsize=8)
+    ax1.text(20.5, -0.5, "20%", color=NAVY, fontsize=8)
     teal_patch = mpatches.Patch(color=TEAL, label="Geometric / material / load")
     gold_patch  = mpatches.Patch(color=GOLD, label="Positional tolerance (new)")
     ax1.legend(handles=[teal_patch, gold_patch], loc="lower right", fontsize=8)
@@ -670,7 +670,7 @@ def plot_design_space(ds: DesignSpace, save_dir: str = ".") -> List:
 
     # ── Fig 2: Tolerance asymmetry ────────────────────────────────────────
     fig2, ax2 = plt.subplots(figsize=(12, 7))
-    fig2.patch.set_facecolor(NAVY)
+    fig2.patch.set_facecolor("white")
     y_pos = np.arange(len(names))
     ax2.barh(y_pos - 0.2, upper_tols, height=0.35, color=TEAL,  label="+upper deviation", edgecolor=NAVY, linewidth=0.3)
     ax2.barh(y_pos + 0.2, lower_tols, height=0.35, color=CORAL, label="−lower deviation (magnitude)", edgecolor=NAVY, linewidth=0.3)
@@ -692,9 +692,9 @@ def plot_design_space(ds: DesignSpace, save_dir: str = ".") -> List:
     geom_idx   = [names.index(n) for n in geom_names]
 
     fig3, axes = plt.subplots(2, 3, figsize=(13, 8))
-    fig3.patch.set_facecolor(NAVY)
+    fig3.patch.set_facecolor("white")
     fig3.suptitle("Fig 3 — Manufacturing Variation Cloud (500 MC samples, geometric vars)",
-                  color="white", y=1.01)
+                  color=NAVY, y=1.01)
     pairs = [(0,1),(0,2),(0,3),(1,2),(1,3),(2,3)]
     for ax, (i, j) in zip(axes.flat, pairs):
         xi = X_mc[:, geom_idx[i]]; xj = X_mc[:, geom_idx[j]]
@@ -722,7 +722,7 @@ if __name__ == "__main__":
     nom = ds.get_nominal()
     n   = len(ds.get_variable_names())
     print(ds.summary())
-    assert n == 21, f"Expected 21 variables, got {n}"
+    assert n == 19, f"Expected 21 variables, got {n}"
     print(f"\n✅  {n} design variables confirmed")
 
     # Asymmetric sampling: h5 R2 must only be ≤ nominal
@@ -737,6 +737,8 @@ if __name__ == "__main__":
     print("✅  pos_tol_front and pos_tol_rear present")
 
     # Plots
+    import os, tempfile
+    tmp_plot_dir = os.path.join(tempfile.gettempdir(), "spindle_plots")
     print("\nGenerating design-space plots...")
-    figs = plot_design_space(ds, save_dir="/tmp/spindle_plots")
+    figs = plot_design_space(ds, save_dir=tmp_plot_dir)
     print(f"✅  {len(figs)} plots generated\n")

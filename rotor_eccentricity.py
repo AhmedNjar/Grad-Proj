@@ -579,10 +579,10 @@ def plot_eccentricity(
     SEG_COLS = [TEAL, MINT, GOLD, CORAL]
     os.makedirs(save_dir, exist_ok=True)
     plt.rcParams.update({
-        "figure.facecolor": NAVY, "axes.facecolor": "#112233",
-        "axes.edgecolor": GRAY, "axes.labelcolor": "white",
+        "figure.facecolor": "white", "axes.facecolor": "white",
+        "axes.edgecolor": GRAY, "axes.labelcolor": "navy",
         "xtick.color": GRAY, "ytick.color": GRAY,
-        "text.color": "white", "grid.color": "#2d4060",
+        "text.color": "navy", "grid.color": "#2d4060",
         "grid.alpha": 0.5, "font.size": 9,
     })
 
@@ -599,8 +599,8 @@ def plot_eccentricity(
         F_max_segs.append(r.ansys_F_imbal_N)
 
     # ── Fig 10a: U_static vs U_allow ─────────────────────────────────────
-    fig, ax = plt.subplots(figsize=(9, 5), facecolor=NAVY)
-    ax.set_facecolor("#112233")
+    fig, ax = plt.subplots(figsize=(9, 5), facecolor="white")
+    ax.set_facecolor("white")
     ax.plot(speeds, U_statics, color=CORAL, lw=2, label="U_static (worst-case)")
     ax.plot(speeds, U_allows,  color=GOLD,  lw=2, linestyle="--",
             label="U_allow (ISO 1940-1 G2.5)")
@@ -615,7 +615,7 @@ def plot_eccentricity(
     ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
     plt.tight_layout()
     p = os.path.join(save_dir, "10a_imbalance_vs_speed.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close(fig); print(f"  Saved → {p}")
 
     # ── Fig 10b: Per-segment F_i @ 4,000 RPM ─────────────────────────────
@@ -624,15 +624,15 @@ def plot_eccentricity(
     seg_F     = [sf.F_N        for sf in r4.segment_forces]
     seg_e     = [sf.e_mm*1000  for sf in r4.segment_forces]  # μm
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5), facecolor=NAVY)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5), facecolor="white")
     for ax in (ax1, ax2):
-        ax.set_facecolor("#112233")
+        ax.set_facecolor("white")
 
     bars = ax1.bar(seg_names, seg_F, color=SEG_COLS[:len(seg_names)],
                    edgecolor=NAVY, linewidth=0.5)
     for bar, val in zip(bars, seg_F):
         ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.001,
-                 f"{val:.4f} N", ha="center", va="bottom", fontsize=8, color="white")
+                 f"{val:.4f} N", ha="center", va="bottom", fontsize=8, color="navy")
     ax1.axhline(analyser.F_limit, color=GOLD, lw=1.5, linestyle="--",
                 label=f"F_limit = {analyser.F_limit} N")
     ax1.set_ylabel("Imbalance force F_i [N]")
@@ -646,15 +646,15 @@ def plot_eccentricity(
     ax2.grid(axis="y", alpha=0.3)
 
     fig.suptitle("Fig 10b — Per-Segment Imbalance Breakdown (ISO 1940-1 G2.5)",
-                 color="white", y=1.02)
+                 color="navy", y=1.02)
     plt.tight_layout()
     p = os.path.join(save_dir, "10b_per_segment_imbalance.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close(fig); print(f"  Saved → {p}")
 
     # ── Fig 10c: F_imbalance vs speed ─────────────────────────────────────
-    fig, ax = plt.subplots(figsize=(9, 5), facecolor=NAVY)
-    ax.set_facecolor("#112233")
+    fig, ax = plt.subplots(figsize=(9, 5), facecolor="white")
+    ax.set_facecolor("white")
     ax.plot(speeds, F_totals,   color=TEAL, lw=2, label="F total (from e_static)")
     ax.plot(speeds, F_max_segs, color=MINT, lw=1.5, linestyle="--",
             label="F max per segment")
@@ -668,7 +668,7 @@ def plot_eccentricity(
     ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
     plt.tight_layout()
     p = os.path.join(save_dir, "10c_imbalance_force_vs_speed.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close(fig); print(f"  Saved → {p}")
 
 

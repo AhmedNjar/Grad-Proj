@@ -579,10 +579,10 @@ def plot_optimizer_results(
     MINT="#06d6a0"; GRAY="#8d99ae"
     os.makedirs(save_dir, exist_ok=True)
     plt.rcParams.update({
-        "figure.facecolor": NAVY, "axes.facecolor": "#112233",
-        "axes.edgecolor": GRAY, "axes.labelcolor": "white",
+        "figure.facecolor": "white", "axes.facecolor": "white",
+        "axes.edgecolor": GRAY, "axes.labelcolor": "navy",
         "xtick.color": GRAY, "ytick.color": GRAY,
-        "text.color": "white", "grid.color": "#2d4060",
+        "text.color": "navy", "grid.color": "#2d4060",
         "grid.alpha": 0.4, "font.size": 9,
     })
 
@@ -593,16 +593,16 @@ def plot_optimizer_results(
     bounds = design_space.get_bounds()
 
     # ── Fig 05a: Pareto front (f1 vs f2, colour = f3 cost) ───────────
-    fig, ax = plt.subplots(figsize=(9, 6), facecolor=NAVY)
-    ax.set_facecolor("#112233")
+    fig, ax = plt.subplots(figsize=(9, 6), facecolor="white")
+    ax.set_facecolor("white")
     n_pts = len(F)
     if n_pts > 1:
         sc = ax.scatter(F[:, 0], F[:, 1], c=F[:, 2], cmap="plasma",
                         s=40, edgecolors="none", alpha=0.85)
         cb = plt.colorbar(sc, ax=ax)
-        cb.set_label("Total cost [USD]", color="white")
-        cb.ax.yaxis.set_tick_params(color="white")
-        plt.setp(cb.ax.yaxis.get_ticklabels(), color="white")
+        cb.set_label("Total cost [USD]", color="navy")
+        cb.ax.yaxis.set_tick_params(color="navy")
+        plt.setp(cb.ax.yaxis.get_ticklabels(), color="navy")
     else:
         ax.scatter(F[:, 0], F[:, 1], c=TEAL, s=80, marker="*", zorder=5)
     # Highlight best point
@@ -617,12 +617,12 @@ def plot_optimizer_results(
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
     p = os.path.join(save_dir, "05a_pareto_front.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close(fig); print(f"  Saved → {p}")
 
     # ── Fig 05b: Final objective values at best design ────────────────
-    fig, ax = plt.subplots(figsize=(9, 5), facecolor=NAVY)
-    ax.set_facecolor("#112233")
+    fig, ax = plt.subplots(figsize=(9, 5), facecolor="white")
+    ax.set_facecolor("white")
     best_f  = F[best_idx]
     f_names = labels if labels else [f"f{i+1}" for i in range(len(best_f))]
     # Normalise each objective relative to its Pareto-front range
@@ -636,7 +636,7 @@ def plot_optimizer_results(
         ax.text(bar.get_x() + bar.get_width()/2,
                 bar.get_height() + 0.02,
                 f"{raw_val:.2f}", ha="center", va="bottom",
-                fontsize=8, color="white")
+                fontsize=8, color="navy")
     ax.set_xticks(range(len(f_names)))
     ax.set_xticklabels([n[:20] for n in f_names], rotation=12, ha="right", fontsize=8)
     ax.set_ylabel("Normalised objective (0=best, 1=worst in Pareto)")
@@ -645,12 +645,12 @@ def plot_optimizer_results(
     ax.grid(axis="y", alpha=0.3)
     plt.tight_layout()
     p = os.path.join(save_dir, "05b_best_objectives.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close(fig); print(f"  Saved → {p}")
 
     # ── Fig 05c: Best design variables vs. bounds ─────────────────────
-    fig, ax = plt.subplots(figsize=(13, 6), facecolor=NAVY)
-    ax.set_facecolor("#112233")
+    fig, ax = plt.subplots(figsize=(13, 6), facecolor="white")
+    ax.set_facecolor("white")
     best_x  = X[best_idx]
     nom_x   = design_space.get_nominal()
     # Normalise each var to [0,1] within its bounds
@@ -671,7 +671,7 @@ def plot_optimizer_results(
     ax.grid(axis="x", alpha=0.3)
     plt.tight_layout()
     p = os.path.join(save_dir, "05c_design_variables.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close(fig); print(f"  Saved → {p}")
 
 
