@@ -32,6 +32,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Optional, Tuple, Union
 import numpy as np
+from plot_theme import apply_paper_theme, C, savefig_paper
+from bearing_catalog import (
+    Bearing, ACBB_CATALOG, CRB_CATALOG,
+    ALL_ACBB_BORES, ALL_CRB_BORES,
+    snap_to_bearing, snap_to_skf_bearing,
+    SUPPORTED_MANUFACTURERS, compare_manufacturers,
+    print_manufacturer_comparison,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -213,11 +221,26 @@ SKF_CRB_CATALOG: List[SKFCRBBearing] = [
     SKFCRBBearing("NU2224 ECP", 120, 215,  58, 305000, 315000,  3000,  4000, 7.90),
 ]
 
-_ACBB_BY_BORE: Dict[float, SKFBearing]    = {b.d: b for b in SKF_ACBB_CATALOG}
-_CRB_BY_BORE:  Dict[float, SKFCRBBearing] = {b.d: b for b in SKF_CRB_CATALOG}
-_ACBB_BORES = np.array(sorted(_ACBB_BY_BORE.keys()))
-_CRB_BORES  = np.array(sorted(_CRB_BY_BORE.keys()))
-BearingRecord = Union[SKFBearing, SKFCRBBearing]
+# ── Multi-manufacturer catalog shims ─────────────────────────────────────
+# _ACBB_BY_BORE / _CRB_BY_BORE now hold the BEST bearing (max C_r) across
+# all 6 manufacturers for each bore size.  Old SKF-only dict preserved as
+# _SKF_ACBB_BY_BORE for backward compatibility.
+_SKF_ACBB_BY_BORE: Dict[float, SKFBearing]    = {b.d: b for b in SKF_ACBB_CATALOG}
+_SKF_CRB_BY_BORE:  Dict[float, SKFCRBBearing] = {b.d: b for b in SKF_CRB_CATALOG}
+
+def _best_at_bore(bore: float, catalog_dict) -> object:
+    candidates = [b for cat in catalog_dict.values() for b in cat if b.d == bore]
+    return max(candidates, key=lambda b: b.C_r)
+
+_ACBB_BY_BORE: Dict[float, object] = {
+    d: _best_at_bore(d, ACBB_CATALOG) for d in ALL_ACBB_BORES
+}
+_CRB_BY_BORE: Dict[float, object] = {
+    d: _best_at_bore(d, CRB_CATALOG) for d in ALL_CRB_BORES
+}
+_ACBB_BORES = ALL_ACBB_BORES
+_CRB_BORES  = ALL_CRB_BORES
+BearingRecord = Union[SKFBearing, SKFCRBBearing, Bearing]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -382,10 +405,10 @@ class DesignSpace:
         "L3": VariableBounds(24.0, 15.0, 40.0,  AsymmetricTolerance(0.100,0.000,note="spacer IT10"), "mm","Flange section length"),
         "L4": VariableBounds(15.0, 10.0, 25.0,  AsymmetricTolerance(0.500,0.000,note="IT12"), "mm","Tail section length"),
         "R1": VariableBounds(45.0, 35.0, 55.0,  AsymmetricTolerance(0.000,0.011,note="ISO h5 Ø90"), "mm","Nose outer radius"),
-        "R2": VariableBounds(35.0, 28.0, 37.5,  AsymmetricTolerance(0.000,0.011,note="ISO h5 Ø50-80"), "mm","Journal radius (bearing seat)"),
+        "R2": VariableBounds(50.0, 35.0, 60.0,  AsymmetricTolerance(0.000,0.013,note="ISO h5 Ø80-120"), "mm","Journal radius (bearing seat)"),
         "R3": VariableBounds(82.5, 70.0, 95.0,  AsymmetricTolerance(0.050,0.050,note="bilateral"), "mm","Flange outer radius"),
         "R4": VariableBounds(45.0, 35.0, 55.0,  AsymmetricTolerance(0.000,0.011,note="ISO h5 Ø90"), "mm","Tail outer radius"),
-        "ri": VariableBounds(20.0, 15.0, 25.0,  AsymmetricTolerance(0.021,0.000,note="ISO H7 Ø40"), "mm","Inner bore radius"),
+        "ri": VariableBounds(30.0, 25.0, 35.0,  AsymmetricTolerance(0.021,0.000,note="ISO H7 Ø60"), "mm","Inner bore radius"),
     })
 
     bearings: Dict[str, VariableBounds] = field(default_factory=lambda: {
@@ -408,6 +431,19 @@ class DesignSpace:
             tolerance=AsymmetricTolerance(0.007,0.004, note="ISO 1101 ⊕, rear seats"),
             unit="mm",
             description="Positional tol. diameter of rear CRB seats",
+        ),
+        # ── Housing bore IT grade (NEW — variable #20) ────────────────────
+        # Controls outer-ring eccentricity → TIR Source 7 and machining cost.
+        # Continuous [5.0, 8.0] representing IT grade number; rounded to integer
+        # during use: 5→H5 (tight, ±0.018mm), 6→H6 (std, ±0.025mm),
+        #             7→H7 (loose, ±0.040mm), 8→H8 (coarse, ±0.063mm).
+        # ISO 15:2017 Table 2: non-rotating outer ring → H6 or H7.
+        # Tighter IT → lower TIR + higher machining cost.
+        "housing_it_grade": VariableBounds(
+            nominal=6.0, lower=5.0, upper=8.0,
+            tolerance=AsymmetricTolerance(0.5, 0.5, note="IT grade number ±0.5"),
+            unit="—",
+            description="Housing bore IT grade (5=H5, 6=H6, 7=H7, 8=H8)",
         ),
     })
 
@@ -627,18 +663,9 @@ def plot_design_space(ds: DesignSpace, save_dir: str = ".") -> List:
 
     os.makedirs(save_dir, exist_ok=True)
 
-    NAVY  = "#0d1b2a"
-    TEAL  = "#00b4d8"
-    CORAL = "#e63946"
-    GOLD  = "#ffd166"
-    GRAY  = "#8d99ae"
-    plt.rcParams.update({
-        "figure.facecolor": "white", "axes.facecolor": "white",
-        "axes.edgecolor": NAVY, "axes.labelcolor": NAVY,
-        "xtick.color": NAVY, "ytick.color": NAVY,
-        "text.color": NAVY, "grid.color": "#2d4060",
-        "grid.alpha": 0.5, "font.size": 9,
-    })
+    NAVY=C.NAVY; TEAL=C.TEAL; CORAL=C.RED; GOLD=C.ORANGE
+    MINT=C.GREEN; GRAY=C.GRAY; PURPLE=C.PURPLE
+    apply_paper_theme()
 
     all_v  = ds.get_all_variables()
     names  = ds.get_variable_names()
@@ -651,14 +678,14 @@ def plot_design_space(ds: DesignSpace, save_dir: str = ".") -> List:
 
     # ── Fig 1: Normalised search range width ─────────────────────────────
     fig1, ax1 = plt.subplots(figsize=(12, 7))
-    fig1.patch.set_facecolor("white")
+    fig1.patch.set_facecolor(C.BG)
     widths = (bounds[:, 1] - bounds[:, 0]) / np.maximum(np.abs(nom), 1e-12) * 100
     colours = [TEAL if "pos_tol" not in n else GOLD for n in names]
     bars = ax1.barh(names, widths, color=colours, edgecolor=NAVY, linewidth=0.4)
     ax1.set_xlabel("Search range / |nominal|  [%]")
     ax1.set_title("Fig 1 — Design Variable Search Range (Normalised)", pad=10)
     ax1.axvline(20, color=GRAY, linestyle="--", linewidth=0.8, alpha=0.7)
-    ax1.text(20.5, -0.5, "20%", color=NAVY, fontsize=8)
+    ax1.text(20.5, -0.5, "20%", color=GRAY, fontsize=8)
     teal_patch = mpatches.Patch(color=TEAL, label="Geometric / material / load")
     gold_patch  = mpatches.Patch(color=GOLD, label="Positional tolerance (new)")
     ax1.legend(handles=[teal_patch, gold_patch], loc="lower right", fontsize=8)
@@ -670,7 +697,7 @@ def plot_design_space(ds: DesignSpace, save_dir: str = ".") -> List:
 
     # ── Fig 2: Tolerance asymmetry ────────────────────────────────────────
     fig2, ax2 = plt.subplots(figsize=(12, 7))
-    fig2.patch.set_facecolor("white")
+    fig2.patch.set_facecolor(C.BG)
     y_pos = np.arange(len(names))
     ax2.barh(y_pos - 0.2, upper_tols, height=0.35, color=TEAL,  label="+upper deviation", edgecolor=NAVY, linewidth=0.3)
     ax2.barh(y_pos + 0.2, lower_tols, height=0.35, color=CORAL, label="−lower deviation (magnitude)", edgecolor=NAVY, linewidth=0.3)
@@ -692,9 +719,9 @@ def plot_design_space(ds: DesignSpace, save_dir: str = ".") -> List:
     geom_idx   = [names.index(n) for n in geom_names]
 
     fig3, axes = plt.subplots(2, 3, figsize=(13, 8))
-    fig3.patch.set_facecolor("white")
+    fig3.patch.set_facecolor(C.BG)
     fig3.suptitle("Fig 3 — Manufacturing Variation Cloud (500 MC samples, geometric vars)",
-                  color=NAVY, y=1.01)
+                  color="white", y=1.01)
     pairs = [(0,1),(0,2),(0,3),(1,2),(1,3),(2,3)]
     for ax, (i, j) in zip(axes.flat, pairs):
         xi = X_mc[:, geom_idx[i]]; xj = X_mc[:, geom_idx[j]]
@@ -722,7 +749,7 @@ if __name__ == "__main__":
     nom = ds.get_nominal()
     n   = len(ds.get_variable_names())
     print(ds.summary())
-    assert n == 19, f"Expected 21 variables, got {n}"
+    assert n == 21, f"Expected 21 variables, got {n}"
     print(f"\n✅  {n} design variables confirmed")
 
     # Asymmetric sampling: h5 R2 must only be ≤ nominal
@@ -737,8 +764,6 @@ if __name__ == "__main__":
     print("✅  pos_tol_front and pos_tol_rear present")
 
     # Plots
-    import os, tempfile
-    tmp_plot_dir = os.path.join(tempfile.gettempdir(), "spindle_plots")
     print("\nGenerating design-space plots...")
-    figs = plot_design_space(ds, save_dir=tmp_plot_dir)
+    figs = plot_design_space(ds, save_dir="/tmp/spindle_plots")
     print(f"✅  {len(figs)} plots generated\n")

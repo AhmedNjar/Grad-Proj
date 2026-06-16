@@ -27,6 +27,7 @@ from typing import Dict, List, Literal, Optional, Tuple   # BUG-5 FIX
 from scipy.stats.qmc import LatinHypercube, Sobol
 
 from design_variables import DesignSpace
+from plot_theme import apply_paper_theme, C, savefig_paper
 
 log = logging.getLogger("LHSSampler")
 logging.basicConfig(level=logging.INFO, format="%(levelname)-8s %(message)s")
@@ -233,24 +234,24 @@ class LHSSampler:
 # PLOTS
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def plot_lhs_samples(X, ds, save_dir="."):
     """Fig 02a/b/c — LHS coverage, 2D scatter pairs, empirical CDF."""
     import matplotlib.pyplot as plt, os
     from matplotlib.patches import Patch
 
-    NAVY="#0d1b2a"; TEAL="#00b4d8"; CORAL="#e63946"; GOLD="#ffd166"; GRAY="#8d99ae"
+    NAVY=C.NAVY; TEAL=C.TEAL; CORAL=C.RED; GOLD=C.ORANGE
+    MINT=C.GREEN; GRAY=C.GRAY; PURPLE=C.PURPLE
     os.makedirs(save_dir, exist_ok=True)
-    plt.rcParams.update({"figure.facecolor": "white","axes.facecolor": "white",
-        "axes.edgecolor":GRAY,"axes.labelcolor": "navy","xtick.color":GRAY,
-        "ytick.color":GRAY,"text.color": "navy","grid.color":"#2d4060","grid.alpha":0.4,"font.size":8})
+    apply_paper_theme()
 
     names  = ds.get_variable_names()
     bounds = ds.get_bounds()
     X_norm = (X - bounds[:,0]) / (bounds[:,1] - bounds[:,0])
 
     # 02a: coverage strip chart
-    fig, ax = plt.subplots(figsize=(13, 6), facecolor="white")
-    ax.set_facecolor("white")
+    fig, ax = plt.subplots(figsize=(13, 6), facecolor=C.BG)
+    ax.set_facecolor(C.BG)
     for i, name in enumerate(names):
         cv = np.std(X_norm[:,i]) / max(np.mean(X_norm[:,i]), 1e-12)
         col = TEAL if cv < 0.6 else CORAL
@@ -263,43 +264,43 @@ def plot_lhs_samples(X, ds, save_dir="."):
     ax.legend(handles=[Patch(color=TEAL,label="uniform"),Patch(color=CORAL,label="clustered")], fontsize=7)
     plt.tight_layout()
     p = os.path.join(save_dir,"02a_lhs_coverage.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white"); plt.close(fig)
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=C.BG); plt.close(fig)
     print(f"  Saved → {p}")
 
     # 02b: 2D scatter pairs (geometric vars)
     geom = [n for n in names if n in ["L1","L2","R1","R2"]]
     gidx = [names.index(n) for n in geom]
     pairs = [(0,1),(0,2),(0,3),(1,2),(1,3),(2,3)]
-    fig, axes = plt.subplots(2, 3, figsize=(12,7), facecolor="white")
-    fig.suptitle("Fig 02b — LHS 2D Projections", color="navy", y=1.01)
+    fig, axes = plt.subplots(2, 3, figsize=(12,7), facecolor=C.BG)
+    fig.suptitle("Fig 02b — LHS 2D Projections", color=C.TEXT, y=1.01)
     for ax,(i,j) in zip(axes.flat, pairs):
-        ax.set_facecolor("white")
+        ax.set_facecolor(C.BG)
         ax.scatter(X[:,gidx[i]], X[:,gidx[j]], s=14, c=TEAL, alpha=0.6, edgecolors="none")
         ax.set_xlabel(geom[i], fontsize=8); ax.set_ylabel(geom[j], fontsize=8)
         ax.tick_params(labelsize=7)
     plt.tight_layout()
     p = os.path.join(save_dir,"02b_lhs_scatter.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white"); plt.close(fig)
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=C.BG); plt.close(fig)
     print(f"  Saved → {p}")
 
     # 02c: empirical CDF vs ideal
-    fig, axes = plt.subplots(3, 7, figsize=(14,6), facecolor="white")
-    fig.suptitle("Fig 02c — Empirical CDF vs Ideal Uniform", color="navy", y=1.01)
+    fig, axes = plt.subplots(3, 7, figsize=(14,6), facecolor=C.BG)
+    fig.suptitle("Fig 02c — Empirical CDF vs Ideal Uniform", color=C.TEXT, y=1.01)
     ideal = np.linspace(0,1,200)
     for ax, name, i in zip(axes.flat, names, range(len(names))):
-        ax.set_facecolor("white")
+        ax.set_facecolor(C.BG)
         ax.step(np.sort(X_norm[:,i]), np.arange(1,len(X)+1)/len(X), color=TEAL, lw=1.1)
         ax.plot(ideal, ideal, color=GOLD, lw=0.8, linestyle="--")
-        ax.set_title(name, fontsize=6.5, color="navy"); ax.tick_params(labelsize=5)
+        ax.set_title(name, fontsize=6.5, color=C.TEXT); ax.tick_params(labelsize=5)
     plt.tight_layout()
     p = os.path.join(save_dir,"02c_lhs_cdf.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white"); plt.close(fig)
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=C.BG); plt.close(fig)
     print(f"  Saved → {p}")
 
 
 if __name__ == "__main__":
-    from design_variables import DesignSpace
     import os
+    from design_variables import DesignSpace
 
     ds      = DesignSpace()
     sampler = LHSSampler(ds)
@@ -327,3 +328,8 @@ if __name__ == "__main__":
     print("\nGenerating LHS plots...")
     plot_lhs_samples(X_lhs, ds, save_dir="/tmp/spindle_plots")
     print("\n✅ LHS sampler v2 OK")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PLOT FUNCTION
+# ─────────────────────────────────────────────────────────────────────────────

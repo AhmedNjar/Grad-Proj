@@ -64,6 +64,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from scipy.optimize import minimize
+from plot_theme import apply_paper_theme, C, savefig_paper
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -127,6 +128,8 @@ def it_value_um(grade: str, nominal_mm: float) -> float:
 JOURNAL_GRADES = ["IT4", "IT5", "IT6", "IT7"]    # for R1,R2,R3,R4
 BORE_GRADES    = ["IT6", "IT7", "IT8", "IT9"]    # for ri
 LENGTH_GRADES  = ["IT10","IT11","IT12","IT13"]   # for L1,L2,L3,L4
+HOUSING_GRADES = ["IT5", "IT6", "IT7", "IT8"]   # for housing bore (non-rotating outer ring)
+                                                  # ISO 15:2017 recommends H6 (IT6) or H7 (IT7)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -180,24 +183,29 @@ def compute_cost(
     it_journal_grade: str,
     it_bore_grade:    str,
     it_length_grade:  str,
+    it_housing_grade: str,        # NEW
     ra_journal_um:    float,
     ra_bore_um:       float,
-    n_journals:       int = 4,    # R1,R2,R3,R4
-    n_lengths:        int = 4,    # L1,L2,L3,L4
+    n_journals:       int = 4,
+    n_lengths:        int = 4,
 ) -> float:
     """
-    Total machining tolerance cost [USD].
+    Total machining tolerance cost [USD] including housing bore.
 
-    Cost scales exponentially with IT tightness and Ra fineness.
-    Each journal is machined separately; bore and lengths are single operations.
+    Housing bore (non-rotating outer ring) machined as a single precision
+    boring operation.  Base cost = $12 (housing is cast iron, easier to bore
+    than alloy steel journals).
     """
     journal_it_cost = _IT_COST_DIAL.get(it_journal_grade, 7.0) * _BASE_COST["journal"]
     bore_it_cost    = _IT_COST_DIAL.get(it_bore_grade,    7.0) * _BASE_COST["bore"]
     length_it_cost  = _IT_COST_DIAL.get(it_length_grade,  1.0) * _BASE_COST["length"]
+    # Housing bore cost (cast iron, single boring pass)
+    housing_it_cost = _IT_COST_DIAL.get(it_housing_grade, 3.0) * 12.0
 
     cost = (n_journals * journal_it_cost
             + bore_it_cost
             + n_lengths * length_it_cost
+            + housing_it_cost                          # NEW
             + _ra_cost(ra_journal_um, "ra_journal") * n_journals
             + _ra_cost(ra_bore_um,   "ra_bore"))
     return cost
@@ -210,74 +218,40 @@ def compute_cost(
 def compute_tir(
     it_journal_grade: str,
     it_bore_grade:    str,
+    it_housing_grade: str,
     pos_tol_front_mm: float,
     pos_tol_rear_mm:  float,
     ra_journal_um:    float,
     ra_bore_um:       float,
-    d_journal_mm:     float,   # 2×R2 (bearing seat diameter)
-    d_bore_mm:        float,   # 2×ri
-    R_outer_mm:       float,   # R2
-    wall_mm:          float,   # R2 − ri
+    d_journal_mm:     float,
+    d_bore_mm:        float,
+    R_outer_mm:       float,
+    wall_mm:          float,
     L_overhang_mm:    float,
     L_span_mm:        float,
-    delta_nose_um:    float,   # ANSYS elastic deflection at nose
+    delta_nose_um:    float,
 ) -> float:
-    """
-    Total TIR at spindle nose [μm] — RSS of all sources.
-
-    Sources:
-      1. Bearing inner-ring: uses journal IT grade → achievable roundness
-      2. Bore eccentricity from IT bore grade → CG shift → imbalance runout
-      3. Positional tolerance front seat (ISO 1101 ⊕)
-      4. Positional tolerance rear seat (tilt)
-      5. Ra of journal → additional roundness penalty
-      6. ANSYS elastic deflection (fixed, from geometry optimisation)
-    """
+    """TIR at spindle nose [μm] — RSS of 7 tolerance-controlled sources."""
     amp = 1.0 + L_overhang_mm / max(L_span_mm, 1.0)
-
-    # ── Source 1: Journal IT grade → bearing seat roundness → TIR ─────
-    # Achievable roundness ≈ 0.25 × IT_value (precision grinding, ISO 4288)
-    it_val_j   = it_value_um(it_journal_grade, d_journal_mm)
-    roundness_j = 0.25 * it_val_j           # [μm]
-    TIR_journal = roundness_j * amp         # [μm]
-
-    # ── Source 2: Ra of journal seat → additional roundness contribution ─
-    # Roughness profile peaks can cause effective eccentricity;
-    # Ra_journal contributes ≈ 0.5 × Ra to roundness deviation
-    TIR_ra = 0.5 * ra_journal_um * amp     # [μm]
-
-    # ── Source 3: IT bore grade → bore eccentricity → CG offset ────────
-    # IT_bore specifies bore DIAMETER tolerance, not axis eccentricity.
-    # Bore axis eccentricity ≈ IT_bore / 6  (3σ process capability of
-    # precision boring machine per ISO 230-2).
-    # IT/2 would be worst-case; IT/6 is the realistic 3σ capability
-    # of a CNC boring operation on a machining centre.
-    it_val_b = it_value_um(it_bore_grade, d_bore_mm)
-    eps_bore  = (it_val_b / 6.0) * 1e-3        # mm  (3σ boring capability)
-    r_outer   = R_outer_mm; r_bore = d_bore_mm / 2.0
-    denom     = r_outer**2 - r_bore**2
-    e_cg_mm   = eps_bore * r_bore**2 / max(denom, 1e-6)
-    TIR_bore  = e_cg_mm * amp * 1000.0          # μm
-
-    # ── Source 4: Positional tolerance front (ISO 1101 ⊕) ───────────────
-    TIR_pos_front = (pos_tol_front_mm / 2.0) * amp * 1000.0      # μm
-
-    # ── Source 5: Positional tolerance rear (tilt) ──────────────────────
-    TIR_pos_rear  = (pos_tol_rear_mm  / 2.0) * (L_overhang_mm / max(L_span_mm,1)) * 1000.0
-
-    # ── Source 6: ANSYS elastic deflection (fixed geometry, not a tolerance) ──
-    # This source is NOT controllable by tolerance optimisation.
-    # Reported separately so constraints apply to tolerance-driven TIR only.
-    TIR_elastic = abs(delta_nose_um)
-
-    # ── RSS of TOLERANCE-CONTROLLED sources only ──────────────────────
-    tir_tol_rss = math.sqrt(
-        TIR_journal**2 + TIR_ra**2 + TIR_bore**2
-        + TIR_pos_front**2 + TIR_pos_rear**2
-    )
-    # Full RSS including fixed ANSYS deflection (for information only)
-    tir_rss = math.sqrt(tir_tol_rss**2 + TIR_elastic**2)
-    return tir_tol_rss   # optimiser only controls tolerance sources
+    # Source 1: journal roundness
+    TIR_journal  = 0.25 * it_value_um(it_journal_grade, d_journal_mm) * amp
+    # Source 2: Ra contribution
+    TIR_ra       = 0.5 * ra_journal_um * amp
+    # Source 3: bore eccentricity (3σ boring)
+    it_val_b     = it_value_um(it_bore_grade, d_bore_mm)
+    r_outer      = R_outer_mm; r_bore = d_bore_mm / 2.0
+    e_cg_mm      = (it_val_b/6.0)*1e-3 * r_bore**2 / max(r_outer**2 - r_bore**2, 1e-6)
+    TIR_bore     = e_cg_mm * amp * 1000.0
+    # Source 4: positional tolerance front
+    TIR_pos_front = (pos_tol_front_mm / 2.0) * amp * 1000.0
+    # Source 5: positional tolerance rear
+    TIR_pos_rear  = (pos_tol_rear_mm / 2.0) * (L_overhang_mm / max(L_span_mm,1)) * 1000.0
+    # Source 6: ANSYS deflection (geometry-driven, excluded from tolerance-only TIR)
+    # Source 7 (NEW): housing bore eccentricity (ISO 286, non-rotating outer ring)
+    _H_IT = {"IT5":18.0,"IT6":25.0,"IT7":40.0,"IT8":63.0}
+    TIR_housing = (_H_IT.get(it_housing_grade, 25.0) / 4.0) * 1e-3 * amp * 1000.0
+    return math.sqrt(TIR_journal**2 + TIR_ra**2 + TIR_bore**2
+                     + TIR_pos_front**2 + TIR_pos_rear**2 + TIR_housing**2)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -327,10 +301,11 @@ def compute_l10_loss_pct(
 
 @dataclass
 class TolerancePoint:
-    """One evaluated tolerance design point."""
+    """One evaluated tolerance design point — 4 IT grades + Ra + positional."""
     it_journal:       str
     it_bore:          str
     it_lengths:       str
+    it_housing:       str        # NEW: housing bore IT grade (H5/H6/H7/H8)
     pos_tol_front_mm: float
     pos_tol_rear_mm:  float
     ra_journal_um:    float
@@ -344,13 +319,12 @@ class TolerancePoint:
         return np.array([self.cost_usd, self.tir_rss_um, self.l10_loss_pct])
 
     def is_dominated_by(self, other: "TolerancePoint") -> bool:
-        """True if other dominates self (all objectives ≤, at least one <)."""
         return (np.all(other.objectives <= self.objectives)
                 and np.any(other.objectives < self.objectives))
 
     def summary(self) -> str:
         return (f"IT_j={self.it_journal:<5} IT_b={self.it_bore:<5}"
-                f" IT_l={self.it_lengths:<5}"
+                f" IT_l={self.it_lengths:<5} IT_h={self.it_housing:<5}"
                 f" pos_f={self.pos_tol_front_mm*1000:.1f}μm"
                 f" pos_r={self.pos_tol_rear_mm*1000:.1f}μm"
                 f" Ra_j={self.ra_journal_um:.2f}μm Ra_b={self.ra_bore_um:.1f}μm"
@@ -393,6 +367,7 @@ class ToleranceEvaluator:
         it_journal:       str,
         it_bore:          str,
         it_lengths:       str,
+        it_housing:       str,        # NEW
         pos_tol_front_mm: float,
         pos_tol_rear_mm:  float,
         ra_journal_um:    float,
@@ -401,11 +376,13 @@ class ToleranceEvaluator:
 
         cost = compute_cost(
             it_journal, it_bore, it_lengths,
+            it_housing,                          # NEW
             ra_journal_um, ra_bore_um,
             n_journals=self.n_j, n_lengths=self.n_l,
         )
         tir = compute_tir(
             it_journal, it_bore,
+            it_housing,                          # NEW
             pos_tol_front_mm, pos_tol_rear_mm,
             ra_journal_um, ra_bore_um,
             d_journal_mm=self.d_j,
@@ -423,6 +400,7 @@ class ToleranceEvaluator:
         )
         return TolerancePoint(
             it_journal, it_bore, it_lengths,
+            it_housing,                          # NEW
             pos_tol_front_mm, pos_tol_rear_mm,
             ra_journal_um, ra_bore_um,
             cost, tir, l10_loss,
@@ -431,10 +409,11 @@ class ToleranceEvaluator:
     def evaluate_vec(
         self,
         it_j: str, it_b: str, it_l: str,
-        cont: np.ndarray,          # [pos_f, pos_r, ra_j, ra_b]
+        it_h: str,                      # NEW
+        cont: np.ndarray,               # [pos_f, pos_r, ra_j, ra_b]
     ) -> np.ndarray:
         """Return (cost, tir, l10_loss) as numpy array."""
-        pt = self.evaluate(it_j, it_b, it_l,
+        pt = self.evaluate(it_j, it_b, it_l, it_h,
                            float(cont[0]), float(cont[1]),
                            float(cont[2]), float(cont[3]))
         return pt.objectives
@@ -524,24 +503,20 @@ class ToleranceOptimizer:
     def _optimise_continuous(
         self,
         it_j: str, it_b: str, it_l: str,
+        it_h: str,                         # NEW: housing grade
         weights: np.ndarray,
     ) -> Optional[np.ndarray]:
-        """
-        Minimise weighted sum of objectives over continuous variables.
-        Returns optimal continuous vector or None if constraints violated.
-        """
+        """Minimise weighted sum over continuous variables for given IT grades."""
         lb = np.array([b[0] for b in self._CONT_BOUNDS])
         ub = np.array([b[1] for b in self._CONT_BOUNDS])
 
         def objective(cont: np.ndarray) -> float:
-            obj = self.ev.evaluate_vec(it_j, it_b, it_l, cont)
-            # Penalty for constraint violations
+            obj = self.ev.evaluate_vec(it_j, it_b, it_l, it_h, cont)
             tir_penalty  = max(0, obj[1] - self.tir_limit)    * 1e4
             l10_penalty  = max(0, obj[2] - self.l10_loss_max) * 1e4
-            # Normalise objectives before weighting
-            norm_cost = obj[0] / 3000.0    # typical max cost ~3000 USD
-            norm_tir  = obj[1] / 50.0      # typical max TIR ~50 μm
-            norm_l10  = obj[2] / 100.0     # max loss 100%
+            norm_cost = obj[0] / 5000.0
+            norm_tir  = obj[1] / 50.0
+            norm_l10  = obj[2] / 100.0
             return (weights[0]*norm_cost + weights[1]*norm_tir
                     + weights[2]*norm_l10 + tir_penalty + l10_penalty)
 
@@ -563,19 +538,19 @@ class ToleranceOptimizer:
         all_points: List[TolerancePoint] = []
         weight_vecs = self._weight_vectors()
 
-        combos = list(product(JOURNAL_GRADES, BORE_GRADES, LENGTH_GRADES))
+        combos = list(product(JOURNAL_GRADES, BORE_GRADES, LENGTH_GRADES, HOUSING_GRADES))
         if verbose:
             print(f"\n  Tolerance Optimizer: {len(combos)} IT combos "
                   f"× {len(weight_vecs)} weight vectors = "
                   f"{len(combos)*len(weight_vecs)} evaluations")
 
-        for it_j, it_b, it_l in combos:
+        for it_j, it_b, it_l, it_h in combos:
             for w in weight_vecs:
-                cont = self._optimise_continuous(it_j, it_b, it_l, w)
+                cont = self._optimise_continuous(it_j, it_b, it_l, it_h, w)
                 if cont is None:
                     continue
                 pt = self.ev.evaluate(
-                    it_j, it_b, it_l,
+                    it_j, it_b, it_l, it_h,
                     float(cont[0]), float(cont[1]),
                     float(cont[2]), float(cont[3]),
                 )
@@ -629,42 +604,45 @@ def print_tolerance_report(
     best:     TolerancePoint,
     var_dict: Dict,
 ) -> None:
-    """Print the full tolerance optimisation report."""
-    print(f"\n{'═'*72}")
-    print(f"  TOLERANCE OPTIMISATION REPORT")
-    print(f"{'═'*72}")
+    """Print the full tolerance optimisation report including housing IT grade."""
+    print(f"\n{'═'*80}")
+    print(f"  TOLERANCE OPTIMISATION REPORT  (4 IT grades + Ra + pos.tol)")
+    print(f"{'═'*80}")
     print(f"\n  Pareto front: {len(pareto)} non-dominated designs")
-    print(f"\n  {'IT_j':<6} {'IT_b':<6} {'IT_l':<6} "
-          f"{'pos_f[μm]':>10} {'pos_r[μm]':>10} "
-          f"{'Ra_j':>6} {'Ra_b':>6} "
-          f"{'Cost[$]':>8} {'TIR[μm]':>8} {'L10loss':>8}")
-    print(f"  {'─'*70}")
+    print(f"\n  {'IT_j':<6} {'IT_b':<6} {'IT_l':<6} {'IT_h':<6}"
+          f" {'pos_f':>7} {'pos_r':>7}"
+          f" {'Ra_j':>5} {'Ra_b':>5}"
+          f" {'Cost[$]':>8} {'TIR[μm]':>8} {'L10loss':>8}")
+    print(f"  {'─'*78}")
     for pt in sorted(pareto, key=lambda p: p.cost_usd):
         marker = " ◄ BEST" if pt is best else ""
-        print(f"  {pt.it_journal:<6} {pt.it_bore:<6} {pt.it_lengths:<6}"
-              f" {pt.pos_tol_front_mm*1000:>10.1f} {pt.pos_tol_rear_mm*1000:>10.1f}"
-              f" {pt.ra_journal_um:>6.2f} {pt.ra_bore_um:>6.1f}"
+        print(f"  {pt.it_journal:<6} {pt.it_bore:<6} {pt.it_lengths:<6} {pt.it_housing:<6}"
+              f" {pt.pos_tol_front_mm*1000:>7.1f} {pt.pos_tol_rear_mm*1000:>7.1f}"
+              f" {pt.ra_journal_um:>5.2f} {pt.ra_bore_um:>5.1f}"
               f" {pt.cost_usd:>8.0f} {pt.tir_rss_um:>8.2f} {pt.l10_loss_pct:>7.1f}%"
               + marker)
 
-    print(f"\n{'─'*72}")
+    print(f"\n{'─'*80}")
     print(f"  RECOMMENDED TOLERANCE SPECIFICATION")
-    print(f"{'─'*72}")
+    print(f"{'─'*80}")
 
     d_j = var_dict.get("R2", 50.0) * 2
     d_b = var_dict.get("ri", 30.0) * 2
-    it_j_val = it_value_um(best.it_journal, d_j)
-    it_b_val = it_value_um(best.it_bore,    d_b)
-    it_l_val = it_value_um(best.it_lengths, 350.0)
+    _H_IT = {"IT5":18.0,"IT6":25.0,"IT7":40.0,"IT8":63.0}
 
     print(f"\n  {'Feature':<35} {'Grade':<8} {'IT value':>10} {'Ra [μm]':>9}  Standard")
-    print(f"  {'─'*75}")
+    print(f"  {'─'*78}")
     print(f"  {'Shaft journals (R1,R2,R3,R4)':<35} {best.it_journal:<8}"
-          f" {it_j_val:>8.0f}μm {best.ra_journal_um:>8.2f}  ISO 286-1 + ISO 4288")
+          f" {it_value_um(best.it_journal,d_j):>8.0f}μm {best.ra_journal_um:>8.2f}"
+          f"  ISO 286-1 + ISO 4288")
     print(f"  {'Inner bore (ri)':<35} {best.it_bore:<8}"
-          f" {it_b_val:>8.0f}μm {best.ra_bore_um:>8.1f}  ISO 286-1")
+          f" {it_value_um(best.it_bore,d_b):>8.0f}μm {best.ra_bore_um:>8.1f}"
+          f"  ISO 286-1")
     print(f"  {'Axial lengths (L1,L2,L3,L4)':<35} {best.it_lengths:<8}"
-          f" {it_l_val:>8.0f}μm {'—':>8}  ISO 286-1")
+          f" {it_value_um(best.it_lengths,350.0):>8.0f}μm {'—':>8}  ISO 286-1")
+    print(f"  {'Housing bore (non-rotating)':<35} {best.it_housing:<8}"
+          f" {_H_IT.get(best.it_housing,25.0):>8.0f}μm {'—':>8}"
+          f"  ISO 286-1 + ISO 15:2017")
     print(f"  {'Front bearing seat  ⊕':<35} {'ISO 1101':<8}"
           f" {best.pos_tol_front_mm*1000:>7.1f}μm {'—':>9}  ISO 1101:2017")
     print(f"  {'Rear bearing seats  ⊕':<35} {'ISO 1101':<8}"
@@ -672,9 +650,9 @@ def print_tolerance_report(
 
     print(f"\n  Expected outcomes:")
     print(f"    Machining cost   : ${best.cost_usd:>8.0f}")
-    print(f"    TIR runout (RSS) : {best.tir_rss_um:>7.2f} μm")
+    print(f"    TIR runout (RSS) : {best.tir_rss_um:>7.2f} μm  (tolerance sources only)")
     print(f"    L10 life loss    : {best.l10_loss_pct:>7.1f} %")
-    print(f"{'═'*72}\n")
+    print(f"{'═'*80}\n")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -696,17 +674,11 @@ def plot_tolerance_pareto(
     import matplotlib.pyplot as plt
     import os
 
-    NAVY="#0d1b2a"; TEAL="#00b4d8"; CORAL="#e63946"; GOLD="#ffd166"
-    MINT="#06d6a0"; GRAY="#8d99ae"; PURPLE="#7400b8"
+    NAVY=C.NAVY; TEAL=C.TEAL; CORAL=C.RED; GOLD=C.ORANGE
+    MINT=C.GREEN; GRAY=C.GRAY; PURPLE=C.PURPLE
     IT_COLOURS = {"IT4": TEAL, "IT5": MINT, "IT6": GOLD, "IT7": CORAL}
     os.makedirs(save_dir, exist_ok=True)
-    plt.rcParams.update({
-        "figure.facecolor": "white", "axes.facecolor": "white",
-        "axes.edgecolor": GRAY, "axes.labelcolor": "navy",
-        "xtick.color": GRAY, "ytick.color": GRAY,
-        "text.color": "navy", "grid.color": "#2d4060",
-        "grid.alpha": 0.4, "font.size": 9,
-    })
+    apply_paper_theme()
 
     costs  = np.array([p.cost_usd     for p in pareto])
     tirs   = np.array([p.tir_rss_um   for p in pareto])
@@ -714,9 +686,9 @@ def plot_tolerance_pareto(
     grades = [p.it_journal for p in pareto]
 
     # ── Fig 12a: 3D Pareto front ──────────────────────────────────────
-    fig = plt.figure(figsize=(10, 7), facecolor="white")
+    fig = plt.figure(figsize=(10, 7), facecolor=C.BG)
     ax  = fig.add_subplot(111, projection="3d")
-    ax.set_facecolor("white")
+    ax.set_facecolor(C.BG)
     for grade in JOURNAL_GRADES:
         mask = [g == grade for g in grades]
         if not any(mask):
@@ -734,19 +706,19 @@ def plot_tolerance_pareto(
     ax.set_zlabel("L10 loss [%]", labelpad=8)
     ax.set_title("Fig 12a — Tolerance Pareto Front\n"
                  "(cost vs TIR vs L10 loss, coloured by IT_journal)",
-                 color="navy", pad=12)
+                 color="white", pad=12)
     ax.legend(fontsize=8, loc="upper left")
     ax.tick_params(colors=GRAY, labelsize=7)
     plt.tight_layout()
     p = os.path.join(save_dir, "12a_pareto_3d.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=C.BG)
     plt.close(fig); print(f"  Saved → {p}")
 
     # ── Fig 12b: 2D projections ───────────────────────────────────────
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5), facecolor="white")
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5), facecolor=C.BG)
     for ax in (ax1, ax2):
-        ax.set_facecolor("white")
-    fig.suptitle("Fig 12b — Tolerance Pareto 2D Projections", color="navy")
+        ax.set_facecolor(C.BG)
+    fig.suptitle("Fig 12b — Tolerance Pareto 2D Projections", color=C.TEXT)
 
     for grade in JOURNAL_GRADES:
         mask = [g == grade for g in grades]
@@ -773,14 +745,14 @@ def plot_tolerance_pareto(
 
     plt.tight_layout()
     p = os.path.join(save_dir, "12b_pareto_2d.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=C.BG)
     plt.close(fig); print(f"  Saved → {p}")
 
     # ── Fig 12c: Best tolerance spec bar chart ────────────────────────
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5), facecolor="white")
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5), facecolor=C.BG)
     for ax in (ax1, ax2):
-        ax.set_facecolor("white")
-    fig.suptitle("Fig 12c — Best Tolerance Specification", color="navy")
+        ax.set_facecolor(C.BG)
+    fig.suptitle("Fig 12c — Best Tolerance Specification", color=C.TEXT)
 
     # IT value comparison (tighter = shorter bar = better quality)
     d_j  = 100.0   # approximate journal diameter for display
@@ -798,7 +770,7 @@ def plot_tolerance_pareto(
     for bar, val in zip(bars, it_vals.values()):
         ax1.text(bar.get_x()+bar.get_width()/2, bar.get_height()+1,
                  f"{val:.0f}μm", ha="center", va="bottom", fontsize=8.5,
-                 color="navy", fontweight="bold")
+                 color="white", fontweight="bold")
     ax1.set_ylabel("Tolerance / IT value [μm]")
     ax1.set_title("IT Values + Positional Tolerances", fontsize=9)
     ax1.grid(axis="y", alpha=0.3)
@@ -814,7 +786,7 @@ def plot_tolerance_pareto(
     for bar, val in zip(bars2, ra_vals.values()):
         ax2.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.02,
                  f"Ra {val:.2f}μm", ha="center", va="bottom", fontsize=9,
-                 color="navy", fontweight="bold")
+                 color="white", fontweight="bold")
     ra_refs = {"N5 (0.4μm)": 0.4, "N6 (0.8μm)": 0.8, "N7 (1.6μm)": 1.6}
     for lbl, val in ra_refs.items():
         ax2.axhline(val, color=GRAY, lw=0.8, linestyle=":", alpha=0.6, label=lbl)
@@ -824,7 +796,7 @@ def plot_tolerance_pareto(
 
     plt.tight_layout()
     p = os.path.join(save_dir, "12c_best_tolerance.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=C.BG)
     plt.close(fig); print(f"  Saved → {p}")
 
 

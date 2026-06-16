@@ -71,18 +71,20 @@ def _import_all():
 
     mods = {}
     mod_paths = {
-        "design_variables":    "design_variables",
-        "lhs_sampler":         "lhs_sampler",
-        "fea_pool_runner":     "fea_pool_runner",
-        "ml_surrogate":        "ml_surrogate",
-        "selective_assembly":  "selective_assembly",   # must be before robust_optimizer
-        "robust_optimizer":    "robust_optimizer",
-        "inverse_design":      "inverse_design",
-        "bearing_performance": "bearing_performance",
-        "shaft_runout":        "shaft_runout",
-        "rotor_eccentricity":  "rotor_eccentricity",
-        "final_report":        "final_report",
-        "tolerance_optimizer": "tolerance_optimizer",
+        "design_variables":    "01_design_variables",
+        "lhs_sampler":         "02_lhs_sampler",
+        "fea_pool_runner":     "03_fea_pool_runner",
+        "ml_surrogate":        "04_ml_surrogate",
+        "selective_assembly":  "07_selective_assembly",   # must be before robust_optimizer
+        "robust_optimizer":    "05_robust_optimizer",
+        "inverse_design":      "06_inverse_design",
+        "bearing_performance": "08_bearing_performance",
+        "shaft_runout":        "09_shaft_runout",
+        "rotor_eccentricity":  "10_rotor_eccentricity",
+        "final_report":        "11_final_report",
+        "tolerance_optimizer": "12_tolerance_optimizer",
+        "reliability_index":   "13_reliability_index",
+        "topsis_selector":     "14_topsis_selector",
     }
 
     # Add script directory to path so bare imports work
@@ -96,7 +98,7 @@ def _import_all():
             try:
                 spec = importlib.util.spec_from_file_location(
                     alias,
-                    script_dir / f"{try_name}.py",
+                    script_dir / f"{mod_name}.py",
                 )
                 m = importlib.util.module_from_spec(spec)
                 sys.modules[alias] = m
@@ -251,6 +253,51 @@ class RDOMasterOrchestrator:
                 save_dir=str(self.plot_dir),
             )
 
+        # ── Active Learning / Adaptive DoE (Module 5) ─────────────────────
+        if self.config.get("active_learning", False):
+            log.info("\n── ACTIVE LEARNING (Adaptive DoE) ──────────────────────────")
+            if surr.model_type not in ("gp", "ensemble"):
+                log.warning(f"   model_type='{surr.model_type}' has no uncertainty "
+                            f"estimate — Active Learning needs 'gp' or 'ensemble'. "
+                            f"Skipping.")
+            else:
+                al_rounds   = int(self.config.get("al_rounds", 2))
+                al_n_select = int(self.config.get("al_n_select", 8))
+                al_pool     = int(self.config.get("al_pool_size", 300))
+
+                al = M["ml_surrogate"].ActiveLearner(self.ds, surr)
+                # Record round-0 (initial) R² for the convergence plot
+                m0 = surr.evaluate(X_te, y_te)
+                al.history.append({
+                    "n_train": len(X_tr),
+                    **{f"R2_{row['output']}": row["R2"] for _, row in m0.iterrows()},
+                })
+
+                X_cur, y_cur = X_tr.copy(), y_tr.copy()
+                for r in range(al_rounds):
+                    log.info(f"   Round {r+1}/{al_rounds}: selecting "
+                             f"{al_n_select} candidates from pool of {al_pool}...")
+                    X_cur, y_cur, surr, r2 = al.run_round(
+                        X_cur, y_cur, out_cols, M["fea_pool_runner"].FEAPoolRunner,
+                        n_pool=al_pool, n_select=al_n_select, seed=100+r,
+                        X_test=X_te, y_test=y_te,
+                    )
+                    r2_str = "  ".join(f"{k}={v:.3f}" for k,v in r2.items())
+                    log.info(f"     n_train={len(X_cur)}  R²: {r2_str}")
+
+                # Re-save the improved surrogate (overwrites initial pkl)
+                pkl_path = self.out_dir / f"surrogate_{surr.model_type}.pkl"
+                surr.save(str(pkl_path))
+                log.info(f"✅ Active Learning complete → {pkl_path} "
+                         f"({len(X_cur)} total samples, "
+                         f"+{len(X_cur)-len(X_tr)} from AL)")
+
+                if not self.config["no_plots"]:
+                    M["ml_surrogate"].plot_active_learning_convergence(
+                        al.history,
+                        save_path=str(self.plot_dir / "04c_active_learning_convergence.png"),
+                    )
+
         return surr
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -258,20 +305,56 @@ class RDOMasterOrchestrator:
     # ─────────────────────────────────────────────────────────────────────────
     def stage_optimize(self, surr: object) -> object:
         log.info("\n── STAGE 4: ROBUST OPTIMIZATION ───────────────────────────────")
-        M   = self.m
+        M      = self.m
+        n_rpm  = float(self.config.get("n_rpm", 4000))
+        method = self.config.get("opt_method", "de")
+
+        # TOPSIS weights (Module 14) — parse "--topsis_weights" CSV string
+        topsis_weights = None
+        tw_str = self.config.get("topsis_weights")
+        if tw_str:
+            try:
+                topsis_weights = np.array([float(v) for v in tw_str.split(",")])
+                if len(topsis_weights) != 8:
+                    log.warning(f"   --topsis_weights expected 8 values, "
+                                f"got {len(topsis_weights)} — using equal weights")
+                    topsis_weights = None
+                else:
+                    log.info(f"   TOPSIS weights: {topsis_weights}")
+            except ValueError:
+                log.warning(f"   Could not parse --topsis_weights='{tw_str}' "
+                            f"— using equal weights")
+
+        mfr = self.config.get("manufacturer", None)
+        if mfr:
+            log.info(f"   Bearing manufacturer locked to: {mfr}")
+
         opt = M["robust_optimizer"].RobustOptimizer(
-            surr, self.ds, n_mc_inner=20, n_sa_bins=5, sa_n_parts=500,
+            surr, self.ds,
+            n_mc_inner       = 20,
+            n_sa_bins        = 5,
+            sa_n_parts       = 500,
+            noise_force_cv   = self.config.get("noise_force_cv",   0.10),
+            noise_temp_max_C = self.config.get("noise_temp_max_c", 60.0),
+            n_rpm            = n_rpm,
+            chatter_Ks           = self.config.get("chatter_Ks",         2500.0),
+            chatter_zeta         = self.config.get("chatter_zeta",       0.03),
+            chatter_b_required   = self.config.get("chatter_b_required", 2.0),
+            bearing_manufacturer = mfr,
         )
 
-        method = self.config.get("opt_method", "de")
-        if method == "nsga2":
-            log.info("Running NSGA-II multi-objective (100 pop × 50 gen)...")
-            result = opt.optimize_nsga2(pop_size=100, n_gen=50, seed=42)
+        if method == "nsga3":
+            log.info("Running NSGA-III (8-obj, pop=120 × 80 gen — recommended)...")
+            result = opt.optimize_nsga3(pop_size=120, n_gen=80, seed=42,
+                                         topsis_weights=topsis_weights)
+        elif method == "nsga2":
+            log.info("Running NSGA-II (legacy, pop=100 × 50 gen)...")
+            result = opt.optimize_nsga2(pop_size=100, n_gen=50, seed=42,
+                                         topsis_weights=topsis_weights)
         else:
-            log.info("Running Differential Evolution (200 iter)...")
-            result = opt.optimize_de(maxiter=200, seed=42)
-
-        n_rpm = float(self.config.get("n_rpm", 4000))
+            log.info("Running DE sweep (21 weight vectors × 200 iter)...")
+            result = opt.optimize_de(maxiter=200, seed=42,
+                                      topsis_weights=topsis_weights)
 
         # ── Catalog-resolved report ───────────────────────────────────────
         rpt = opt.report_best(result, n_rpm=n_rpm)
@@ -281,7 +364,7 @@ class RDOMasterOrchestrator:
         # Save correct CSV (catalog values, not raw optimizer)
         csv_path = self.out_dir / "optimal_design.csv"
         import csv
-        with open(csv_path, "w", newline="", encoding="utf-8") as fh:
+        with open(csv_path, "w", newline="") as fh:
             writer = csv.DictWriter(fh, fieldnames=list(mfg.keys()))
             writer.writeheader(); writer.writerow(mfg)
         log.info(f"✅ Optimal design saved → {csv_path}")
@@ -290,11 +373,48 @@ class RDOMasterOrchestrator:
         log.info(f"   Bore (catalog): {mfg.get('bore_catalog_mm','?')} mm")
         log.info(f"   K_radial      : {mfg.get('K_radial_catalog',0):,.0f} N/mm")
 
+        # ── Selected design metrics (TOPSIS-chosen point) ──────────────────
+        if result.topsis_result is not None:
+            best_idx = result.topsis_result.best_idx
+            topsis_c = result.topsis_result.scores[best_idx]
+        else:
+            best_idx = 0
+            topsis_c = float("nan")
+        best_F = result.pareto_front_F[best_idx]
+
+        if len(best_F) >= 6:
+            L10_h = -best_F[4] * opt.L10_target
+            log.info(f"   L10 (est.)    : {L10_h:,.0f} h")
+            log.info(f"   Speed ratio   : {best_F[5]:.3f}  "
+                     f"({'SAFE ✅' if best_F[5]<0.75 else 'WARN ⚠️ >0.75'})")
+        if len(best_F) >= 7:
+            beta_sys = -best_F[6]
+            log.info(f"   β_system      : {beta_sys:.3f}  "
+                     f"({'RELIABLE ✅' if beta_sys>=3.0 else 'CHECK ⚠️'})")
+        if len(best_F) >= 8:
+            chatter_ratio = best_F[7]
+            b_lim = opt.chatter_b_required / max(chatter_ratio, 1e-9)
+            log.info(f"   Chatter ratio : {chatter_ratio:.3f}  "
+                     f"(b_lim={b_lim:.2f}mm, b_req={opt.chatter_b_required:.1f}mm)  "
+                     f"{'STABLE ✅' if chatter_ratio<=1.0 else 'UNSTABLE ❌'}")
+        log.info(f"   TOPSIS score  : C={topsis_c:.4f}  "
+                 f"(Module 14, knee-point of {len(result.pareto_front_F)} Pareto points)")
+
         if not self.config["no_plots"]:
             log.info("   Generating optimizer plots...")
             M["robust_optimizer"].plot_optimizer_results(
                 result, self.ds, save_dir=str(self.plot_dir),
             )
+            # TOPSIS ranking plot (Module 14)
+            if result.topsis_result is not None:
+                try:
+                    M["topsis_selector"].plot_topsis_ranking(
+                        result.pareto_front_F, result.topsis_result,
+                        opt.objective_labels,
+                        save_path=str(self.plot_dir / "14a_topsis_ranking.png"),
+                    )
+                except Exception as e:
+                    log.warning(f"   TOPSIS plot skipped: {e}")
 
         return result
 
@@ -338,10 +458,10 @@ class RDOMasterOrchestrator:
         NAVY="#0d1b2a"; TEAL="#00b4d8"; CORAL="#e63946"
         GOLD="#ffd166"; MINT="#06d6a0"; GRAY="#8d99ae"
         plt.rcParams.update({
-            "figure.facecolor": "white", "axes.facecolor": "white",
-            "axes.edgecolor": GRAY, "axes.labelcolor": "navy",
+            "figure.facecolor": NAVY, "axes.facecolor": "#112233",
+            "axes.edgecolor": GRAY, "axes.labelcolor": "white",
             "xtick.color": GRAY, "ytick.color": GRAY,
-            "text.color": "navy", "grid.color": "#2d4060",
+            "text.color": "white", "grid.color": "#2d4060",
             "grid.alpha": 0.4, "font.size": 9,
         })
 
@@ -357,11 +477,11 @@ class RDOMasterOrchestrator:
         means      = np.array([r.mean_gap_um       for r in sa_results])
         reduc_pct  = (1 - std_after / std_before) * 100
 
-        fig = plt.figure(figsize=(16, 14), facecolor="white")
+        fig = plt.figure(figsize=(16, 14), facecolor=NAVY)
         fig.suptitle(
             "جدول مقارنة: الانحراف المعياري وتشتت التجاوزات عند واجهات المغزل الحرجة\n"
             "قبل وبعد تطبيق استراتيجية التجميع الانتقائي — 5 فئات",
-            color="navy", fontsize=13, fontweight="bold", y=0.98,
+            color="white", fontsize=13, fontweight="bold", y=0.98,
         )
         gs = GridSpec(3, 2, figure=fig, hspace=0.55, wspace=0.38,
                       top=0.91, bottom=0.06, left=0.07, right=0.97)
@@ -369,26 +489,26 @@ class RDOMasterOrchestrator:
         x  = np.arange(n); w = 0.32
 
         # ── σ bar chart ───────────────────────────────────────────────────
-        ax0 = fig.add_subplot(gs[0, 0]); ax0.set_facecolor("white")
+        ax0 = fig.add_subplot(gs[0, 0]); ax0.set_facecolor("#112233")
         b1 = ax0.bar(x - w/2, std_before, w, color=CORAL, edgecolor=NAVY, linewidth=0.5,
                      label="قبل SA (Before)")
         b2 = ax0.bar(x + w/2, std_after,  w, color=TEAL,  edgecolor=NAVY, linewidth=0.5,
                      label="بعد SA (After 5 bins)")
         for bar, val in zip(list(b1)+list(b2), list(std_before)+list(std_after)):
             ax0.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.08,
-                     f"{val:.2f}", ha="center", va="bottom", fontsize=8, color="navy")
+                     f"{val:.2f}", ha="center", va="bottom", fontsize=8, color="white")
         ax0.set_xticks(x); ax0.set_xticklabels([f"I{i+1}" for i in range(n)])
         ax0.set_ylabel("σ [μm]")
         ax0.set_title("الانحراف المعياري σ — قبل / بعد", fontsize=10, pad=6)
         ax0.legend(fontsize=8); ax0.grid(axis="y", alpha=0.35)
 
         # ── 6σ spread bar chart ───────────────────────────────────────────
-        ax1 = fig.add_subplot(gs[0, 1]); ax1.set_facecolor("white")
+        ax1 = fig.add_subplot(gs[0, 1]); ax1.set_facecolor("#112233")
         b3 = ax1.bar(x - w/2, spread_b, w, color=CORAL, edgecolor=NAVY, linewidth=0.5)
         b4 = ax1.bar(x + w/2, spread_a, w, color=TEAL,  edgecolor=NAVY, linewidth=0.5)
         for bar, val in zip(list(b3)+list(b4), list(spread_b)+list(spread_a)):
             ax1.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.2,
-                     f"{val:.1f}", ha="center", va="bottom", fontsize=8, color="navy")
+                     f"{val:.1f}", ha="center", va="bottom", fontsize=8, color="white")
         ax1.set_xticks(x); ax1.set_xticklabels([f"I{i+1}" for i in range(n)])
         ax1.set_ylabel("6σ Spread [μm]")
         ax1.set_title("تشتت التجاوزات (6σ) — قبل / بعد", fontsize=10, pad=6)
@@ -398,13 +518,13 @@ class RDOMasterOrchestrator:
         ax1.grid(axis="y", alpha=0.35)
 
         # ── improvement horizontal bar ────────────────────────────────────
-        ax2 = fig.add_subplot(gs[1, 0]); ax2.set_facecolor("white")
+        ax2 = fig.add_subplot(gs[1, 0]); ax2.set_facecolor("#112233")
         colours_imp = [MINT if v >= 3 else GOLD for v in improve]
         bars = ax2.barh(np.arange(n), improve, color=colours_imp,
                         edgecolor=NAVY, linewidth=0.5, height=0.45)
         for bar, val in zip(bars, improve):
             ax2.text(bar.get_width()+0.05, bar.get_y()+bar.get_height()/2,
-                     f"×{val:.2f}", va="center", fontsize=9, color="navy",
+                     f"×{val:.2f}", va="center", fontsize=9, color="white",
                      fontweight="bold")
         ax2.axvline(1.0, color=GRAY, lw=0.9, linestyle="--", alpha=0.6)
         ax2.set_yticks(np.arange(n))
@@ -414,15 +534,15 @@ class RDOMasterOrchestrator:
         ax2.grid(axis="x", alpha=0.35)
 
         # ── yield + reduction dual axis ───────────────────────────────────
-        ax3 = fig.add_subplot(gs[1, 1]); ax3.set_facecolor("white")
-        ax3b = ax3.twinx(); ax3b.set_facecolor("white")
+        ax3 = fig.add_subplot(gs[1, 1]); ax3.set_facecolor("#112233")
+        ax3b = ax3.twinx(); ax3b.set_facecolor("#112233")
         b5 = ax3.bar(x - w/2,  yields,    w, color=GOLD, edgecolor=NAVY, linewidth=0.5,
                      label="Yield %")
         b6 = ax3b.bar(x + w/2, reduc_pct, w, color=MINT, edgecolor=NAVY, linewidth=0.5,
                       label="تخفيض σ %")
         for bar, val in zip(b5, yields):
             ax3.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.2,
-                     f"{val:.1f}%", ha="center", va="bottom", fontsize=8, color="navy")
+                     f"{val:.1f}%", ha="center", va="bottom", fontsize=8, color="white")
         for bar, val in zip(b6, reduc_pct):
             ax3b.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.5,
                       f"{val:.0f}%", ha="center", va="bottom", fontsize=8, color=MINT)
@@ -457,14 +577,14 @@ class RDOMasterOrchestrator:
         for j in range(len(cols)):
             cell = tbl[0, j]
             cell.set_facecolor(TEAL)
-            cell.set_text_props(color="navy", fontweight="bold")
+            cell.set_text_props(color="white", fontweight="bold")
             cell.set_edgecolor(NAVY)
         for i, row in enumerate(rows):
             for j in range(len(cols)):
                 cell = tbl[i+1, j]
                 cell.set_facecolor(row_colours[i % 2])
                 cell.set_edgecolor(NAVY)
-                cell.set_text_props(color="navy")
+                cell.set_text_props(color="white")
                 if j == 7:   # improvement column
                     cell.set_facecolor(MINT if improve[i] >= 4 else
                                        GOLD if improve[i] >= 2.5 else CORAL)
@@ -472,18 +592,33 @@ class RDOMasterOrchestrator:
                 if j == 6:
                     cell.set_text_props(color=MINT, fontweight="bold")
         ax4.set_title("جدول ملخص المقارنة الكاملة — الواجهات الحرجة",
-                      color="navy", fontsize=10, pad=8)
+                      color="white", fontsize=10, pad=8)
         imap = " | ".join([f"I{i+1}={nm}" for i, nm in enumerate(en_names)])
         fig.text(0.5, 0.025, imap, ha="center", color=GRAY, fontsize=8)
 
         p = str(self.plot_dir / "07_sa_comparison_table.png")
-        fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
+        fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
         plt.close(fig)
         log.info(f"   Saved → {p}")
 
     # ─────────────────────────────────────────────────────────────────────────
     # Stage 6 — Bearing Performance
     # ─────────────────────────────────────────────────────────────────────────
+    def stage_manufacturer_comparison(
+        self,
+        bore_radius_mm: float,
+        n_rpm:          float = 4000.0,
+    ) -> None:
+        """Print side-by-side comparison of all 6 manufacturers for the optimal bore."""
+        try:
+            from bearing_catalog import print_manufacturer_comparison
+            log.info("\n── BEARING MANUFACTURER COMPARISON ──────────────────────────────")
+            log.info(f"   Bore radius = {bore_radius_mm:.1f}mm → bore Ø{bore_radius_mm*2:.0f}mm")
+            print_manufacturer_comparison(bore_radius_mm * 2, "ACBB", n_rpm)
+            print_manufacturer_comparison(bore_radius_mm * 2, "CRB",  n_rpm)
+        except ImportError as e:
+            log.warning(f"bearing_catalog not found: {e}")
+
     def stage_bearing_performance(self, x_opt: np.ndarray, n_rpm: float) -> object:
         log.info("\n── STAGE 6: BEARING PERFORMANCE ────────────────────────────────")
         M    = self.m
@@ -628,6 +763,38 @@ class RDOMasterOrchestrator:
     # ─────────────────────────────────────────────────────────────────────────
     # Stage 11 — Tolerance Optimization  (Module 12)
     # ─────────────────────────────────────────────────────────────────────────
+    def stage_reliability(
+        self, x_opt: np.ndarray, surr: object,
+        delta_nose_um: float, n_rpm: float,
+    ) -> object:
+        log.info("\n── RELIABILITY ANALYSIS (β — Module 13) ──────────────────────")
+        M = self.m
+        if "reliability_index" not in M:
+            log.warning("   reliability_index not loaded — skipping"); return None
+        ls = M["reliability_index"].default_limit_states(
+            delta_max_um=20.0, fos_min=2.0, n_rpm=n_rpm)
+        ra = M["reliability_index"].ReliabilityAnalyser(ls)
+        sys_rel = ra.compute_from_design(
+            x_opt, surr, self.ds, n_mc=300,
+            noise_force_cv   = self.config.get("noise_force_cv",   0.10),
+            noise_temp_max_C = self.config.get("noise_temp_max_c", 60.0),
+            seed=42,
+        )
+        sys_rel.print_report()
+        log.info(f"   β_sys={sys_rel.beta_system:.3f}  "
+                 f"P_f={sys_rel.pf_system*100:.4f}%  "
+                 f"Weakest: {sys_rel.beta_min_name} β={sys_rel.beta_min:.3f}")
+        if sys_rel.beta_system >= 3.0:   log.info("   ✅ RELIABLE")
+        elif sys_rel.beta_system >= 2.0: log.warning("   ⚠️  MARGINAL")
+        else:                            log.warning("   ❌ UNRELIABLE")
+        if not self.config["no_plots"]:
+            M["reliability_index"].plot_reliability_gauges(
+                sys_rel, str(self.plot_dir/"13a_reliability_gauges.png"),
+                design_name=f"Optimal Design n={n_rpm:.0f}RPM")
+            M["reliability_index"].plot_beta_vs_samples(
+                sys_rel, str(self.plot_dir/"13b_beta_convergence.png"))
+        return sys_rel
+
     def stage_tolerance_optimization(
         self,
         x_opt:        np.ndarray,
@@ -683,7 +850,7 @@ class RDOMasterOrchestrator:
         sp_pf    = dev_result.get("pos_tol_front")
         sp_pr    = dev_result.get("pos_tol_rear")
         # sp_bal is a DeviationParetoPoint — use best.it_journal for grade
-        with open(tol_path, "w", newline="", encoding="utf-8") as fh:
+        with open(tol_path, "w", newline="") as fh:
             w = csv.writer(fh)
             w.writerow(["feature","it_grade","it_value_um","upper_dev_um",
                         "lower_dev_um","iso_fit","clearance_um","tir_fit_um",
@@ -691,6 +858,13 @@ class RDOMasterOrchestrator:
             if sp_bal:   # DeviationParetoPoint (knee point)
                 it_val = M["tolerance_optimizer"].it_value_um(
                     best.it_journal, v["R2"] * 2)
+                # Housing IT grade from best TolerancePoint
+                _H_IT = {"IT5":18.0,"IT6":25.0,"IT7":40.0,"IT8":63.0}
+                h_grade = getattr(best, "it_housing", "IT6")
+                w.writerow(["housing_bore", h_grade,
+                            _H_IT.get(h_grade, 25.0), 0, 0,
+                            f"H{h_grade[-1]}", 0, 0,
+                            "non-rotating outer ring", "ISO 286-1+ISO 15"])
                 w.writerow(["journals_R1R2R3R4", best.it_journal,
                             round(it_val, 1),
                             round(sp_bal.upper_dev_um, 1),
@@ -724,6 +898,9 @@ class RDOMasterOrchestrator:
         M       = self.m
         builder = M["final_report"].FinalReportBuilder(
             FoS_min=2.0, delta_max_um=20.0, tir_limit_um=20.0, L10_target_hours=20000,  # Option C
+            chatter_Ks         = self.config.get("chatter_Ks",         2500.0),
+            chatter_zeta       = self.config.get("chatter_zeta",       0.03),
+            chatter_b_required = self.config.get("chatter_b_required", 2.0),
         )
 
         # Print to console
@@ -739,7 +916,7 @@ class RDOMasterOrchestrator:
                                   ecc_result, fea_row, n_rpm=n_rpm,
                                   design_name="Optimised Spindle Design")
         rpt_path = self.out_dir / "optimal_design_report.txt"
-        rpt_path.write_text(buf.getvalue(), encoding="utf-8")
+        rpt_path.write_text(buf.getvalue())
         log.info(f"   Report saved → {rpt_path}")
 
         if not self.config["no_plots"]:
@@ -794,7 +971,10 @@ class RDOMasterOrchestrator:
         # 9. Eccentricity (uses precomputed span)
         ecc_result = self.stage_eccentricity(var_d, n_rpm, span)
 
-        # 10. Inverse design
+        # 10. Reliability Index β
+        self.stage_reliability(x_opt, surr, delta_nose_um, n_rpm)
+
+        # 10b. Inverse design
         self.stage_inverse_design(df)
 
         # 11. Tolerance Optimization (Option C — Module 12)
@@ -818,7 +998,7 @@ class RDOMasterOrchestrator:
         log.info("="*72)
 
     # ─────────────────────────────────────────────────────────────────────────
-    # ml_only — load existing FEA CSV and complete the full workflow
+    # ml_only — load existing FEA CSV
     # ─────────────────────────────────────────────────────────────────────────
     def run_ml_only(self) -> None:
         fea_csv = self.config.get("fea_csv")
@@ -828,13 +1008,10 @@ class RDOMasterOrchestrator:
         df   = pd.read_csv(fea_csv)
         surr = self.stage_surrogate(df)
         self.stage_inverse_design(df)
-        opt_result = self.stage_optimize(surr) # تغيير بسيط لتخزين النتيجة
-
-        # استكمال بقية المراحل الهندسية تلقائياً بناءً على التصميم الأمثل الناتج
-        self._complete_workflow_from_opt(opt_result, df)
+        self.stage_optimize(surr)
 
     # ─────────────────────────────────────────────────────────────────────────
-    # opt_only — load pre-trained surrogate and complete the full workflow
+    # opt_only — load pre-trained surrogate
     # ─────────────────────────────────────────────────────────────────────────
     def run_opt_only(self) -> None:
         pkl = self.config.get("surrogate_pkl")
@@ -842,139 +1019,7 @@ class RDOMasterOrchestrator:
             log.error(f"Surrogate pkl not found: {pkl}")
             return
         surr = self.m["ml_surrogate"].SurrogateModel.load(pkl)
-        opt_result = self.stage_optimize(surr) # تغيير بسيط لتخزين النتيجة
-
-        # في نمط opt_only لا نملك الـ df بالكامل، سنمرر None لـ stage_inverse_design
-        self._complete_workflow_from_opt(opt_result, df=None)
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Custom Mode: run_from_surrogate — Full Downstream Engineering Pipeline
-    # ─────────────────────────────────────────────────────────────────────────
-    def run_from_surrogate(self) -> None:
-        log.info("🚀 Starting custom workflow: From Surrogate to Final Report...")
-
-        # 1. قراءة ملف الـ FEA CSV (مهم جداً للمرحلة التاسعة والمرحلة الثالثة إن لزم الأمر)
-        fea_csv = self.config.get("fea_csv")
-        if not fea_csv or not Path(fea_csv).exists():
-            log.error(f"❌ FEA CSV file not found at: {fea_csv}. Please provide a valid --fea_csv path.")
-            return
-        df = pd.read_csv(fea_csv)
-
-        # 2. STAGE 3: الحصول على نموذج السيروجيت (تحميل أو تدريب)
-        pkl = self.config.get("surrogate_pkl")
-        if pkl and Path(pkl).exists():
-            log.info(f"💾 Loading pre-trained surrogate model from: {pkl}")
-            surr = self.m["ml_surrogate"].SurrogateModel.load(pkl)
-        else:
-            log.info("🧠 Pre-trained surrogate PKL not found. Training a new surrogate from FEA CSV (Stage 3)...")
-            surr = self.stage_surrogate(df)
-
-        # 3. STAGE 4: Optimization (التحسين المتين)
-        log.info("🎯 Running Stage 4: Robust Design Optimization...")
-        opt_result = self.stage_optimize(surr)
-
-        x_opt = opt_result.best_robust_design
-        var_d = self.ds.decode_vector(x_opt)
-        n_rpm = float(self.config.get("n_rpm", 4000.0))
-
-        # حساب مواضع المحامل والـ Span لتمريرها للمراحل التالية
-        z_f, z_r = self.m["shaft_runout"].get_bearing_positions_from_design(var_d, self.arr)
-        span = max(z_r - z_f, 1.0)
-
-        # 4. STAGE 5: Selective Assembly (التجميع الانتقائي)
-        log.info("🔩 Running Stage 5: Selective Assembly Yield Analysis...")
-        self.stage_selective_assembly(var_d)
-
-        # 5. STAGE 6: Bearing Performance (أداء وعمر المحامل)
-        log.info("🔄 Running Stage 6: Bearing Performance & Life Analysis...")
-        bearing_state = self.stage_bearing_performance(x_opt, n_rpm)
-
-        # محاكاة سريعة جداً لنقطة التصميم الأمثل للحصول على الـ Deflection الدقيق اللازم للـ Runout والتقرير
-        log.info("🔍 Running single-point verification for the optimal design...")
-        is_dry = self.config.get("dry_run", False)
-        fea_df = self.m["fea_pool_runner"].FEAPoolRunner(
-            np.array([x_opt]), self.ds, dry_run=is_dry
-        ).execute_batch()
-        fea_row = fea_df.iloc[0]
-        delta_nose_um = float(fea_row["static_max_deflection_um"])
-
-        # 6. STAGE 7: Runout Budget Analysis
-        log.info("📐 Running Stage 7: Shaft Runout Budget Analysis...")
-        runout_bd = self.stage_runout(var_d, delta_nose_um, n_rpm, z_f, z_r)
-
-        # 7. STAGE 8: Rotor Eccentricity (اللامركزية والاتزان الديناميكي)
-        log.info("⚖️ Running Stage 8: Rotor Eccentricity & Dynamic Imbalance...")
-        ecc_result = self.stage_eccentricity(var_d, n_rpm, span)
-
-        # 8. STAGE 9: Inverse Design Verification
-        log.info("🔄 Running Stage 9: Inverse Design Mapping...")
-        self.stage_inverse_design(df)
-
-        # 9. STAGE 11: Tolerance Optimization (حساب التسامحات الأمثل)
-        log.info("📏 Running Stage 11: Optimal Tolerance Recommendations...")
-        self.stage_tolerance_optimization(
-            x_opt, delta_nose_um, bearing_state.L10_system_hours, z_f, z_r
-        )
-
-        # 10. STAGE 12: Final Engineering Report + All 33 Plots
-        log.info("📋 Running Stage 12: Generating Final Engineering Report and Plots...")
-        self.stage_final_report(x_opt, bearing_state, runout_bd, ecc_result, fea_row, n_rpm)
-
-        # طباعة ملخص النجاح النهائي في الـ Terminal
-        plots = sorted([f for f in os.listdir(self.plot_dir) if f.endswith(".png")])
-        log.info("\n" + "="*72)
-        log.info(f" 🎉 CUSTOM WORKFLOW COMPLETE (Skipped initial FEA loop successfully)")
-        log.info(f" 📊 Generated {len(plots)} Plots in directory: {self.plot_dir}")
-        log.info(f" 📂 All CSV reports saved to directory: {self.out_dir}")
-        log.info("="*72)
-    
-    # ── دالة مساعدة جديدة لتفادي تكرار الكود وسحب بقية مراحل الحسابات ──
-    def _complete_workflow_from_opt(self, opt_result, df=None) -> None:
-        n_rpm = float(self.config.get("n_rpm", 4000.0))
-        x_opt = opt_result.best_robust_design
-        var_d = self.ds.decode_vector(x_opt)
-
-        z_f, z_r = self.m["shaft_runout"].get_bearing_positions_from_design(var_d, self.arr)
-        span = max(z_r - z_f, 1.0)
-
-        # 5. Selective Assembly
-        self.stage_selective_assembly(var_d)
-
-        # 6. Bearing Performance
-        bearing_state = self.stage_bearing_performance(x_opt, n_rpm)
-
-        # 7. FEA single-point for reporting (نقطة واحدة سريعة جداً لا تحتاج للـ FEA pool بالكامل)
-        M = self.m
-        fea_df = M["fea_pool_runner"].FEAPoolRunner(
-            np.array([x_opt]), self.ds, dry_run=True).execute_batch()
-        fea_row = fea_df.iloc[0]
-        delta_nose_um = float(fea_row["static_max_deflection_um"])
-
-        # 8. Runout
-        runout_bd = self.stage_runout(var_d, delta_nose_um, n_rpm, z_f, z_r)
-
-        # 9. Eccentricity
-        ecc_result = self.stage_eccentricity(var_d, n_rpm, span)
-
-        # 10. Inverse design (يعمل فقط لو وفرنا الـ df)
-        if df is not None:
-            self.stage_inverse_design(df)
-
-        # 11. Tolerance Optimization ✅ (ستعمل الآن بنجاح هنا)
-        self.stage_tolerance_optimization(
-            x_opt, delta_nose_um, bearing_state.L10_system_hours, z_f, z_r,
-        )
-
-        # 12. Final report
-        self.stage_final_report(x_opt, bearing_state, runout_bd, ecc_result, fea_row, n_rpm)
-
-        # طباعة ملخص النهاية
-        plots = sorted([f for f in os.listdir(self.plot_dir) if f.endswith(".png")])
-        log.info("\n" + "="*72)
-        log.info(f"  ✅ WORKFLOW COMPLETE (Skipped initial FEA loop)")
-        log.info(f"  Output dir  : {self.out_dir}")
-        log.info(f"  Plots dir   : {self.plot_dir}")
-        log.info("="*72)
+        self.stage_optimize(surr)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -987,21 +1032,43 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__.split("Usage:")[1].split("Output files")[0] if "Usage:" in __doc__ else "",
     )
-    p.add_argument("--mode",          choices=["full","ml_only","opt_only", "from_surrogate"], default="full")
+    p.add_argument("--mode",          choices=["full","ml_only","opt_only"], default="full")
     p.add_argument("--n_samples",     type=int,   default=50)
     p.add_argument("--dry_run",       action="store_true")
-    p.add_argument("--surrogate",     choices=["gp","xgb","mlp"], default="gp")
-    p.add_argument("--opt_method",    choices=["de","nsga2"],     default="nsga2")
+    p.add_argument("--surrogate",     choices=["gp","xgb","mlp","ensemble"], default="gp",
+                   help="ensemble = GP+GBR, recommended with --active_learning")
+    # Active Learning / Adaptive DoE (Module 5)
+    p.add_argument("--active_learning", action="store_true",
+                   help="Enable uncertainty-driven Adaptive DoE after initial training")
+    p.add_argument("--al_rounds",     type=int, default=2,
+                   help="Number of Active Learning rounds (default 2)")
+    p.add_argument("--al_n_select",   type=int, default=8,
+                   help="High-uncertainty candidates added per AL round (default 8)")
+    p.add_argument("--al_pool_size",  type=int, default=300,
+                   help="LHS candidate pool size per AL round (default 300)")
+    # Chatter Stability (Module 9, option C: constraint + objective f8)
+    p.add_argument("--chatter_Ks",         type=float, default=2500.0,
+                   help="Specific cutting force coefficient [N/mm^2] (default 2500, steel)")
+    p.add_argument("--chatter_zeta",       type=float, default=0.03,
+                   help="Structural damping ratio (default 0.03)")
+    p.add_argument("--chatter_b_required", type=float, default=2.0,
+                   help="Required stable axial depth of cut [mm] (default 2.0)")
+    # TOPSIS knee-point weights (Module 14)
+    p.add_argument("--manufacturer", type=str, default=None,
+                   choices=["SKF","FAG","NSK","NTN","JTEKT","Timken",None],
+                   help="Restrict bearing selection to one manufacturer "
+                        "(default: None = best across all manufacturers)")
+    p.add_argument("--topsis_weights", type=str, default=None,
+                   help="Comma-separated 8 floats for TOPSIS objective weights "
+                        "(default: equal weights). "
+                        "Order: defl,stress,cost,weight,L10,speed,beta,chatter")
+    p.add_argument("--opt_method",    choices=["de","nsga2","nsga3"], default="de",
+                   help="de=fast sweep | nsga2=legacy | nsga3=recommended for 6-obj")
     p.add_argument("--output_dir",    default="rdo_results")
     p.add_argument("--no_plots",      action="store_true")
     p.add_argument("--n_rpm",         type=float, default=4000.0)
     p.add_argument("--fea_csv",       default=None)
     p.add_argument("--surrogate_pkl", default=None)
-    # Noise / uncertainty CLI options (added to avoid AttributeError in main)
-    p.add_argument("--noise_force_cv",    type=float, default=0.1,
-                   help="Coefficient of variation for force noise (fraction)")
-    p.add_argument("--noise_temp_max_c",  type=float, default=60.0,
-                   help="Max temperature noise in °C")
     return p.parse_args()
 
 

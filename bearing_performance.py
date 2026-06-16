@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
+from plot_theme import apply_paper_theme, C, savefig_paper
 
 from design_variables import (
     DesignSpace,
@@ -406,6 +407,12 @@ class BearingPerformanceCalculator:
         P        = max(P, 0.01 * C_r)
         L10_rev  = (C_r / P) ** p * 1.0e6
         L10h     = L10_rev / (60.0 * n_rpm) if n_rpm > 0 else 0.0
+        # NOTE (P2): ISO 281:2007 Annex C defines MODIFIED rating life L10m:
+        #   L10m = a1 × aISO × L10
+        # where a_ISO accounts for lubrication (κ=ν/ν₁), contamination (eC),
+        # and fatigue limit load. For well-lubricated spindle bearings (κ≥1,
+        # clean oil-air), a_ISO can be 3–10×, giving L10m >> L10.
+        # This code reports basic L10 (a_ISO = 1.0 — conservative).
         return float(P), float(L10h)
 
     def _system_l10(self, sst: List[StationState]) -> float:
@@ -492,17 +499,11 @@ def plot_bearing_performance(
     import matplotlib.pyplot as plt
     import os
 
-    NAVY="#0d1b2a"; TEAL="#00b4d8"; CORAL="#e63946"
-    GOLD="#ffd166"; GRAY="#8d99ae"; MINT="#06d6a0"
+    NAVY=C.NAVY; TEAL=C.TEAL; CORAL=C.RED; GOLD=C.ORANGE
+    MINT=C.GREEN; GRAY=C.GRAY; PURPLE=C.PURPLE
     os.makedirs(save_dir, exist_ok=True)
 
-    plt.rcParams.update({
-        "figure.facecolor": "white", "axes.facecolor": "white",
-        "axes.edgecolor": GRAY, "axes.labelcolor": "navy",
-        "xtick.color": GRAY, "ytick.color": GRAY,
-        "text.color": "navy", "grid.color": "#2d4060",
-        "grid.alpha": 0.5, "font.size": 9,
-    })
+    apply_paper_theme()
 
     if speeds is None:
         speeds = [1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 5500, 6000]
@@ -513,8 +514,8 @@ def plot_bearing_performance(
         s = calc.evaluate(x_nominal, n_rpm=float(n))
         l10_vals.append(s.L10_system_hours)
 
-    fig, ax = plt.subplots(figsize=(9, 5), facecolor="white")
-    ax.set_facecolor("white")
+    fig, ax = plt.subplots(figsize=(9, 5), facecolor=C.BG)
+    ax.set_facecolor(C.BG)
     ax.plot(speeds, [v/1000 for v in l10_vals], color=TEAL, lw=2, marker="o", ms=5)
     ax.axhline(calc.l10_target/1000, color=GOLD, lw=1.5, linestyle="--",
                label=f"Target L10 = {calc.l10_target/1000:.0f} kh")
@@ -526,7 +527,7 @@ def plot_bearing_performance(
     ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
     plt.tight_layout()
     p = os.path.join(save_dir, "08a_l10_vs_speed.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=C.BG)
     plt.close(fig); print(f"  Saved → {p}")
 
     # ── Fig 08b: Stiffness per station ────────────────────────────────────
@@ -539,8 +540,8 @@ def plot_bearing_performance(
     ka_vals = [ss.K_axial_pair_N_mm  / 1000 for ss in s4.stations]
 
     x_pos = np.arange(len(st_labels))
-    fig, ax = plt.subplots(figsize=(8, 5), facecolor="white")
-    ax.set_facecolor("white")
+    fig, ax = plt.subplots(figsize=(8, 5), facecolor=C.BG)
+    ax.set_facecolor(C.BG)
     bars_r = ax.bar(x_pos - 0.2, kr_vals, 0.35, label="K_radial [N/μm]",
                     color=TEAL, edgecolor=NAVY, linewidth=0.5)
     bars_a = ax.bar(x_pos + 0.2, ka_vals, 0.35, label="K_axial [N/μm]",
@@ -549,14 +550,14 @@ def plot_bearing_performance(
         h = bar.get_height()
         if h > 0.5:
             ax.text(bar.get_x() + bar.get_width()/2, h + 0.5, f"{h:.0f}",
-                    ha="center", va="bottom", fontsize=8, color="navy")
+                    ha="center", va="bottom", fontsize=8, color="white")
     ax.set_xticks(x_pos); ax.set_xticklabels(st_labels, fontsize=9)
     ax.set_ylabel("Stiffness [N/μm]")
     ax.set_title("Fig 08b — Bearing Pair Stiffness per Station @ 4,000 RPM", pad=10)
     ax.legend(fontsize=8); ax.grid(axis="y", alpha=0.3)
     plt.tight_layout()
     p = os.path.join(save_dir, "08b_stiffness_per_station.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=C.BG)
     plt.close(fig); print(f"  Saved → {p}")
 
     # ── Fig 08c: Constraint satisfaction bar chart ────────────────────────
@@ -570,8 +571,8 @@ def plot_bearing_performance(
     )
     colours_c = [CORAL if gi > 0 else TEAL for gi in g_arr]
 
-    fig, ax = plt.subplots(figsize=(10, 5), facecolor="white")
-    ax.set_facecolor("white")
+    fig, ax = plt.subplots(figsize=(10, 5), facecolor=C.BG)
+    ax.set_facecolor(C.BG)
     ax.barh(c_names, g_arr, color=colours_c, edgecolor=NAVY, linewidth=0.4)
     ax.axvline(0, color=GOLD, lw=1.5, linestyle="--")
     ax.set_xlabel("Constraint value g  (g ≤ 0 = satisfied)")
@@ -579,7 +580,7 @@ def plot_bearing_performance(
     ax.grid(axis="x", alpha=0.3)
     plt.tight_layout()
     p = os.path.join(save_dir, "08c_constraints.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=C.BG)
     plt.close(fig); print(f"  Saved → {p}")
 
 
@@ -587,6 +588,51 @@ def plot_bearing_performance(
 # Smoke test
 # ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+
+    # ── Also run the manufacturer comparison plot ───────────────────────────
+    try:
+        from bearing_catalog import compare_manufacturers
+        import matplotlib.pyplot as plt
+        from plot_theme import apply_paper_theme, C as PT, savefig_paper
+        apply_paper_theme()
+
+        bore_test = 110.0   # typical CNC lathe front spindle bore
+        rows_acbb = compare_manufacturers(bore_test, "ACBB", n_rpm=4000.0)
+        rows_crb  = compare_manufacturers(bore_test, "CRB",  n_rpm=4000.0)
+
+        fig, axes = plt.subplots(1, 2, figsize=(13, 5), facecolor=PT.BG)
+        colours   = [PT.BLUE, PT.RED, PT.ORANGE, PT.GREEN, PT.PURPLE, PT.GRAY]
+
+        for ax, rows, title, label in [
+            (axes[0], rows_acbb, f"ACBB  Ø{bore_test:.0f}mm bore",  "C_r [kN]"),
+            (axes[1], rows_crb,  f"CRB   Ø{bore_test:.0f}mm bore", "C_r [kN]"),
+        ]:
+            ax.set_facecolor(PT.BG)
+            mfrs = [r["manufacturer"] for r in rows]
+            vals = [r["C_r_kN"]       for r in rows]
+            bars = ax.barh(mfrs, vals,
+                           color=[colours[i % len(colours)] for i in range(len(mfrs))],
+                           edgecolor=PT.NAVY, linewidth=0.6)
+            for bar, val in zip(bars, vals):
+                ax.text(val + 0.5, bar.get_y() + bar.get_height()/2,
+                        f"{val:.1f} kN", va="center", fontsize=8.5, color=PT.TEXT)
+            ax.set_xlabel(label); ax.set_title(title)
+            # Speed-limit indicators
+            for i, r in enumerate(rows):
+                clr = PT.GREEN if r["speed_ok"] else PT.RED
+                ax.text(0.98, i, "✅" if r["speed_ok"] else "❌",
+                        transform=ax.get_yaxis_transform(),
+                        ha="right", va="center", fontsize=11, color=clr)
+
+        fig.suptitle(f"Manufacturer Comparison — n = 4000 rpm\n"
+                     f"(sorted by C_r; ✅/❌ = grease speed OK at 4000 rpm)",
+                     fontweight="bold")
+        plt.tight_layout()
+        savefig_paper(fig, "/tmp/08d_manufacturer_comparison.png")
+        plt.close(fig)
+        print("Manufacturer comparison plot: /tmp/08d_manufacturer_comparison.png")
+    except Exception as e:
+        print(f"Manufacturer comparison plot skipped: {e}")
     import sys; sys.path.insert(0, ".")
     from design_variables import DesignSpace, SpindleBearingArrangement
     import os

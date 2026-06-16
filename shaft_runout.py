@@ -72,6 +72,7 @@ import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 import numpy as np
+from plot_theme import apply_paper_theme, C, savefig_paper
 
 # Bearing precision class inner-ring radial runout [μm] per ISO 492:2014
 BEARING_RUNOUT_UM: Dict[str, float] = {
@@ -365,10 +366,22 @@ class ShaftRunoutAnalyser:
         TIR_pos_rear = e_pos_rear * (L_oh / L_span) * 1000.0   # μm
 
         # ── Source 7: Housing bore eccentricity (ISO 286 H5/H6/H7) ──────────
-        # Housing bore IT grade → eccentricity of outer ring → TIR at nose
-        # d_housing = bearing OD (D from catalog, default ~160mm for Ø90 bore)
+        # Housing bore IT grade: prefer value from design vector (variable #20),
+        # fall back to ShaftRunoutAnalyser instance attribute (constructor param).
+        housing_grade_num = var_dict.get("housing_it_grade", None)
+        if housing_grade_num is not None:
+            grade_int    = int(round(float(housing_grade_num)))
+            grade_int    = max(4, min(8, grade_int))   # clamp to H4-H8
+            effective_housing_grade = f"H{grade_int}"
+        else:
+            effective_housing_grade = self.housing_it_grade  # constructor default
+
+        # Temporarily override instance grade for this calculation
+        _orig = self.housing_it_grade
+        self.housing_it_grade = effective_housing_grade
         d_housing = var_dict.get("R2", 50.0) * 2 + 60.0   # approx OD = bore + 60mm
         TIR_housing, housing_it_val = self._housing_tir(d_housing, amp)
+        self.housing_it_grade = _orig
 
         # ── Combinations ──────────────────────────────────────────────────
         vals = [TIR_bearing, TIR_straight, TIR_elastic,
@@ -398,7 +411,7 @@ class ShaftRunoutAnalyser:
             delta_T_C           = dT,
             pos_tol_front_mm    = pos_front,
             pos_tol_rear_mm     = pos_rear,
-            housing_it_grade    = self.housing_it_grade,
+            housing_it_grade    = effective_housing_grade,
             housing_it_value_um = housing_it_val,
         )
 
@@ -478,9 +491,10 @@ def plot_runout_breakdown(
     """
     import matplotlib.pyplot as plt
 
-    NAVY = "#0d1b2a"; TEAL="#00b4d8"; CORAL="#e63946"; GOLD="#ffd166"
-    MINT="#06d6a0"; PURPLE="#7400b8"; PINK="#f72585"; GRAY="#8d99ae"
-    colours = [TEAL, MINT, GOLD, CORAL, PINK, PURPLE, GRAY]
+    NAVY=C.NAVY; TEAL=C.TEAL; CORAL=C.RED; GOLD=C.ORANGE
+    MINT=C.GREEN; GRAY=C.GRAY; PURPLE=C.PURPLE
+    PINK=C.ORANGE   # used in TIR source colours
+    colours = [TEAL, MINT, GOLD, CORAL, PINK, PURPLE, GRAY, C.BLUE]
 
     sources = bd.sources_dict
     names   = list(sources.keys())
@@ -488,8 +502,8 @@ def plot_runout_breakdown(
     total_v = sum(values)
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5),
-                                    facecolor="white", gridspec_kw={"width_ratios":[2,1]})
-    fig.suptitle("Spindle Nose TIR — 6-Source Breakdown",
+                                    facecolor=C.BG, gridspec_kw={"width_ratios":[2,1]})
+    fig.suptitle("Spindle Nose TIR — 6-Source Breakdown", color=C.TEXT,
                  fontsize=12, y=1.02)
 
     # Left: stacked bar
@@ -499,31 +513,31 @@ def plot_runout_breakdown(
                  edgecolor=NAVY, linewidth=0.5, label=f"{lbl}: {val:.2f} μm")
         if val > 0.3:
             ax1.text(left + val/2, 0, f"{val:.2f}", ha="center", va="center",
-                     fontsize=7.5, color="navy", fontweight="bold")
+                     fontsize=7.5, color="white", fontweight="bold")
         left += val
 
     ax1.axvline(bd.TIR_rss_um,    color=GOLD,  linestyle="--", lw=1.5,
                 label=f"RSS  = {bd.TIR_rss_um:.2f} μm")
     ax1.axvline(bd.TIR_linear_um, color=CORAL, linestyle=":",  lw=1.5,
                 label=f"Linear = {bd.TIR_linear_um:.2f} μm")
-    ax1.set_facecolor("white"); ax1.set_xlabel("TIR contribution [μm]", color="navy")
-    ax1.tick_params(colors="navy"); ax1.legend(fontsize=7.5, loc="lower right")
+    ax1.set_facecolor(C.BG); ax1.set_xlabel("TIR contribution [μm]", color="white")
+    ax1.tick_params(colors="white"); ax1.legend(fontsize=7.5, loc="lower right")
 
     # Right: pie of % variance contribution (RSS basis)
     pcts = [(v**2 / max(bd.TIR_rss_um**2, 1e-12))*100 for v in values]
     wedges, texts, autotexts = ax2.pie(
         pcts, labels=names, colors=colours,
         autopct=lambda p: f"{p:.0f}%" if p > 3 else "",
-        textprops={"fontsize": 7, "color": "navy"},
-        wedgeprops={"edgecolor": "white", "linewidth": 0.6},
+        textprops={"fontsize": 7, "color": "white"},
+        wedgeprops={"edgecolor": NAVY, "linewidth": 0.6},
     )
     for at in autotexts:
-        at.set_color("navy"); at.set_fontsize(7)
-    ax2.set_facecolor("white")
-    ax2.set_title("Variance share (RSS basis)", fontsize=9)
+        at.set_color("white"); at.set_fontsize(7)
+    ax2.set_facecolor(C.BG)
+    ax2.set_title("Variance share (RSS basis)", color="white", fontsize=9)
 
     plt.tight_layout()
-    fig.savefig(save_path, dpi=150, bbox_inches="tight", facecolor="white")
+    fig.savefig(save_path, dpi=150, bbox_inches="tight", facecolor=C.BG)
     plt.close(fig)
     print(f"  Saved → {save_path}")
 
@@ -544,7 +558,8 @@ def plot_runout_vs_speed(
     """
     import matplotlib.pyplot as plt
 
-    NAVY="#0d1b2a"; TEAL="#00b4d8"; CORAL="#e63946"; GOLD="#ffd166"; GRAY="#8d99ae"
+    NAVY=C.NAVY; TEAL=C.TEAL; CORAL=C.RED; GOLD=C.ORANGE
+    MINT=C.GREEN; GRAY=C.GRAY; PURPLE=C.PURPLE
     if speeds is None:
         speeds = np.linspace(500, 6000, 60).tolist()
 
@@ -556,8 +571,8 @@ def plot_runout_vs_speed(
         tir_thermal.append(bd.TIR_thermal_um)
         tir_geom.append(bd.TIR_geometric_um)
 
-    fig, ax = plt.subplots(figsize=(10, 5), facecolor="white")
-    ax.set_facecolor("white")
+    fig, ax = plt.subplots(figsize=(10, 5), facecolor=C.BG)
+    ax.set_facecolor(C.BG)
     ax.plot(speeds, tir_total,   color=TEAL,  lw=2,   label="Total TIR (RSS, with ANSYS)")
     ax.plot(speeds, tir_geom,    color=GOLD,  lw=1.5, linestyle="--", label="Geometric TIR (pre-FEA)")
     ax.fill_between(speeds, tir_thermal, 0, alpha=0.25, color=CORAL, label="Thermal contribution")
@@ -566,16 +581,17 @@ def plot_runout_vs_speed(
     ax.axvline(4000, color=GRAY, lw=0.8, linestyle="--", alpha=0.7, label="Nominal 4,000 RPM")
     ax.axvline(6000, color=GRAY, lw=0.6, linestyle=":",  alpha=0.6, label="Max 6,000 RPM")
 
-    ax.set_xlabel("Operating speed [RPM]", color="navy")
-    ax.set_ylabel("TIR at spindle nose [μm]", color="navy")
-    ax.set_title("Fig 2 — Spindle Nose TIR vs. Speed\n(ISO 230-3 thermal model + analytical sources)")
-    ax.tick_params(colors="navy")
+    ax.set_xlabel("Operating speed [RPM]", color="white")
+    ax.set_ylabel("TIR at spindle nose [μm]", color="white")
+    ax.set_title("Fig 2 — Spindle Nose TIR vs. Speed\n(ISO 230-3 thermal model + analytical sources)",
+                 color="white")
+    ax.tick_params(colors="white")
     ax.legend(fontsize=8, loc="upper left")
     ax.set_xlim(min(speeds), max(speeds))
     ax.grid(True, alpha=0.3, color=GRAY)
 
     plt.tight_layout()
-    fig.savefig(save_path, dpi=150, bbox_inches="tight", facecolor="white")
+    fig.savefig(save_path, dpi=150, bbox_inches="tight", facecolor=C.BG)
     plt.close(fig)
     print(f"  Saved → {save_path}")
 
@@ -597,7 +613,8 @@ def plot_tir_sensitivity(
     """
     import matplotlib.pyplot as plt
 
-    NAVY="#0d1b2a"; TEAL="#00b4d8"; CORAL="#e63946"; GOLD="#ffd166"; GRAY="#8d99ae"
+    NAVY=C.NAVY; TEAL=C.TEAL; CORAL=C.RED; GOLD=C.ORANGE
+    MINT=C.GREEN; GRAY=C.GRAY; PURPLE=C.PURPLE
 
     bd_nom = analyser.analyse(var_dict, z_front, z_rear,
                               delta_nose_ansys_um=delta_nose, Fr_N=Fr_N, n_rpm=n_rpm)
@@ -670,23 +687,24 @@ def plot_tir_sensitivity(
     d_hi   = [deltas_hi[i] for i in order]
     d_lo   = [deltas_lo[i] for i in order]
 
-    fig, ax = plt.subplots(figsize=(10, 6), facecolor="white")
-    ax.set_facecolor("white")
+    fig, ax = plt.subplots(figsize=(10, 6), facecolor=C.BG)
+    ax.set_facecolor(C.BG)
     y_pos = np.arange(len(labels))
     ax.barh(y_pos, d_hi, color=TEAL,  alpha=0.85, label="+perturbation", height=0.4,
             left=0, edgecolor=NAVY, linewidth=0.4)
     ax.barh(y_pos, d_lo, color=CORAL, alpha=0.85, label="−perturbation", height=0.4,
             left=0, edgecolor=NAVY, linewidth=0.4)
-    ax.axvline(0, color="navy", lw=0.8)
-    ax.set_yticks(y_pos); ax.set_yticklabels(labels, fontsize=9, color="navy")
-    ax.set_xlabel("ΔTIR (RSS) from nominal [μm]", color="navy")
-    ax.set_title(f"Fig 3 — TIR Sensitivity Tornado  (nominal TIR = {nom_tir:.2f} μm)")
-    ax.tick_params(colors="navy")
+    ax.axvline(0, color="white", lw=0.8)
+    ax.set_yticks(y_pos); ax.set_yticklabels(labels, fontsize=9, color="white")
+    ax.set_xlabel("ΔTIR (RSS) from nominal [μm]", color="white")
+    ax.set_title(f"Fig 3 — TIR Sensitivity Tornado  (nominal TIR = {nom_tir:.2f} μm)",
+                 color="white")
+    ax.tick_params(colors="white")
     ax.legend(fontsize=8)
     ax.grid(axis="x", alpha=0.3, color=GRAY)
 
     plt.tight_layout()
-    fig.savefig(save_path, dpi=150, bbox_inches="tight", facecolor="white")
+    fig.savefig(save_path, dpi=150, bbox_inches="tight", facecolor=C.BG)
     plt.close(fig)
     print(f"  Saved → {save_path}")
 
@@ -743,15 +761,13 @@ if __name__ == "__main__":
 
     # Plots
     print("\nGenerating runout plots...")
-    import os, tempfile
-    save_dir = os.path.join(tempfile.gettempdir(), "spindle_plots")
-    os.makedirs(save_dir, exist_ok=True)
-    plot_runout_breakdown(bd35, os.path.join(save_dir, "09a_runout_breakdown.png"))
+    import os; os.makedirs("/tmp/spindle_plots", exist_ok=True)
+    plot_runout_breakdown(bd35, "/tmp/spindle_plots/09a_runout_breakdown.png")
     plot_runout_vs_speed(nom, z_front, z_rear, analyser,
                          delta_nose_um=35, Fr_N=Fr_N,
-                         save_path=os.path.join(save_dir, "09b_runout_vs_speed.png"))
+                         save_path="/tmp/spindle_plots/09b_runout_vs_speed.png")
     plot_tir_sensitivity(nom, z_front, z_rear, analyser,
                          n_rpm=4000, delta_nose=35, Fr_N=Fr_N,
-                         save_path=os.path.join(save_dir, "09c_tir_sensitivity.png"))
+                         save_path="/tmp/spindle_plots/09c_tir_sensitivity.png")
     print("✅  All 3 runout plots generated\n")
     print("✅  Module 09 v3 — all checks passed")

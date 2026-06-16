@@ -40,6 +40,7 @@ except ImportError:
     TF_AVAILABLE = False
 
 from design_variables import DesignSpace
+from plot_theme import apply_paper_theme, C, savefig_paper
 
 log = logging.getLogger("InverseDesign")
 logging.basicConfig(level=logging.INFO, format="%(levelname)-8s %(message)s")
@@ -350,16 +351,10 @@ def plot_inverse_design(
     import matplotlib.pyplot as plt
     import os
 
-    NAVY="#0d1b2a"; TEAL="#00b4d8"; CORAL="#e63946"; GOLD="#ffd166"
-    MINT="#06d6a0"; GRAY="#8d99ae"
+    NAVY=C.NAVY; TEAL=C.TEAL; CORAL=C.RED; GOLD=C.ORANGE
+    MINT=C.GREEN; GRAY=C.GRAY; PURPLE=C.PURPLE
     os.makedirs(save_dir, exist_ok=True)
-    plt.rcParams.update({
-        "figure.facecolor": "white", "axes.facecolor": "white",
-        "axes.edgecolor": GRAY, "axes.labelcolor": "navy",
-        "xtick.color": GRAY, "ytick.color": GRAY,
-        "text.color": "navy", "grid.color": "#2d4060",
-        "grid.alpha": 0.4, "font.size": 9,
-    })
+    apply_paper_theme()
 
     ds     = engine.design_space
     x_pred = engine.predict_design(target)
@@ -369,8 +364,8 @@ def plot_inverse_design(
     tgt_values = list(target.values())
 
     # ── Fig 06a: Target vs forward-predicted performance ─────────────
-    fig, ax = plt.subplots(figsize=(9, 5), facecolor="white")
-    ax.set_facecolor("white")
+    fig, ax = plt.subplots(figsize=(9, 5), facecolor=C.BG)
+    ax.set_facecolor(C.BG)
 
     # If forward surrogate provided, get achieved performance
     achieved = []
@@ -396,18 +391,18 @@ def plot_inverse_design(
         for i, (t, a) in enumerate(zip(tgt_values, achv_vals)):
             err_pct = abs(a - t) / max(abs(t), 1e-12) * 100
             ax.text(i, max(t, a) + max(tgt_values) * 0.02,
-                    f"{err_pct:.1f}%", ha="center", fontsize=8, color="navy")
+                    f"{err_pct:.1f}%", ha="center", fontsize=8, color="white")
     ax.set_xticks(x_pos); ax.set_xticklabels(tgt_names, fontsize=9)
     ax.set_ylabel("Performance value"); ax.set_title("Fig 06a — Inverse Design Validation", pad=8)
     ax.legend(fontsize=8); ax.grid(axis="y", alpha=0.3)
     plt.tight_layout()
     p = os.path.join(save_dir, "06a_inverse_validation.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=C.BG)
     plt.close(fig); print(f"  Saved → {p}")
 
     # ── Fig 06b: Predicted design variables (normalised in bounds) ────
-    fig, ax = plt.subplots(figsize=(13, 6), facecolor="white")
-    ax.set_facecolor("white")
+    fig, ax = plt.subplots(figsize=(13, 6), facecolor=C.BG)
+    ax.set_facecolor(C.BG)
     x_norm = (x_pred - bounds[:, 0]) / (bounds[:, 1] - bounds[:, 0])
     nom_x  = ds.get_nominal()
     nom_norm = (nom_x - bounds[:, 0]) / (bounds[:, 1] - bounds[:, 0])
@@ -424,18 +419,18 @@ def plot_inverse_design(
     ax.grid(axis="x", alpha=0.3)
     plt.tight_layout()
     p = os.path.join(save_dir, "06b_inverse_design_vars.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=C.BG)
     plt.close(fig); print(f"  Saved → {p}")
 
     # ── Fig 06c: Error per performance target ─────────────────────────
-    fig, ax = plt.subplots(figsize=(7, 4), facecolor="white")
-    ax.set_facecolor("white")
+    fig, ax = plt.subplots(figsize=(7, 4), facecolor=C.BG)
+    ax.set_facecolor(C.BG)
     if any(v is not None for v in achieved):
         errs = [(a - t) / max(abs(t), 1e-12) * 100 if a is not None else 0
                 for a, t in zip(achieved, tgt_values)]
         colours_e = [TEAL if abs(e) < 10 else CORAL for e in errs]
         ax.bar(tgt_names, errs, color=colours_e, edgecolor=NAVY, linewidth=0.5)
-        ax.axhline(0,  color="navy", lw=1.0)
+        ax.axhline(0,  color="white", lw=1.0)
         ax.axhline(+10, color=GOLD, lw=1.0, linestyle="--", alpha=0.7)
         ax.axhline(-10, color=GOLD, lw=1.0, linestyle="--", alpha=0.7, label="±10% limit")
         ax.set_ylabel("Relative error  [%]")
@@ -447,7 +442,7 @@ def plot_inverse_design(
         ax.set_title("Fig 06c — Prediction Error (surrogate required)", pad=8)
     plt.tight_layout()
     p = os.path.join(save_dir, "06c_inverse_error.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white")
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=C.BG)
     plt.close(fig); print(f"  Saved → {p}")
 
 

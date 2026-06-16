@@ -26,7 +26,6 @@ import logging
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
-import os
 
 import numpy as np
 import pandas as pd
@@ -48,6 +47,7 @@ except ImportError:
     )
 
 from design_variables import DesignSpace
+from plot_theme import apply_paper_theme, C, savefig_paper
 
 log = logging.getLogger("FEA_Pool")
 logging.basicConfig(level=logging.INFO, format="%(levelname)-8s %(message)s")
@@ -197,9 +197,14 @@ class FEAPoolRunner:
         delta_nose_um  = delta_nose_mm * 1e3     # μm
 
         # ── Bending stress at front bearing (max moment location) ─────────────
+        # Static stress only — Euler-Bernoulli bending: σ = M·R/I
+        # This is a STATIC safety factor (σ_y / σ_max), NOT a DIN 743 fatigue SF.
+        # For rotating bending (R = -1 loading), fatigue SF per DIN 743 would
+        # require endurance limit, size/surface factors (Kf), and mean stress —
+        # not implemented here. The static SF is reported for reference only.
         M_max     = F_transverse * a             # N·mm
         sigma_MPa = M_max * R_nose / I_nose
-        fos       = v["sigma_y"] / max(sigma_MPa, 1e-6)
+        fos       = v["sigma_y"] / max(sigma_MPa, 1e-6)  # Static SF only
 
         # ── Natural frequency — Dunkerly superposition (BUG-12 FIX) ──────────
         # Dunkerly: 1/f₁² = 1/f_beam² + 1/f_front² + 1/f_rear²
@@ -252,13 +257,6 @@ class FEAPoolRunner:
 
         v = self.design_space.decode_vector(x)
 
-        # ── تعديل للحماية: حساب الجساءة ديناميكياً من الكتالوج لأنها لم تعد في الـ Design Space ──
-        from design_variables import snap_to_skf_bearing
-        brg_front, _, _ = snap_to_skf_bearing(v["R2"], "ACBB", 4000.0, "grease")
-        K_radial_calc = float(1.7 * brg_front.radial_stiffness_single_N_mm)
-        # جلب الجساءة المحورية بأمان، مع وضع قيمة احتياطية في حال لم تكن معرفة بنفس الاسم
-        K_axial_calc = float(1.7 * getattr(brg_front, "axial_stiffness_single_N_mm", brg_front.radial_stiffness_single_N_mm * 0.7))
-
         case = SimulationCase(
             case_id  = case_id,
             geometry = SpindleGeometry(
@@ -273,7 +271,7 @@ class FEAPoolRunner:
             bearings = BearingConfig(
                 front_z_fraction=v["front_z_fraction"],
                 rear_z_fraction =v["rear_z_fraction"],
-                K_radial=K_radial_calc, K_axial=K_axial_calc, # تعديل: استخدام القيم المحسوبة ديناميكياً
+                K_radial=v["K_radial"], K_axial=v["K_axial"],
             ),
             loads    = CuttingLoads(Ft=v["Ft"], Fr=v["Fr"], Ff=v["Ff"]),
             mesh     = MeshConfig(),
@@ -290,7 +288,7 @@ class FEAPoolRunner:
         res.update({f"var_{k}": float(v_) for k, v_ in v.items()})
         res["mode"] = "ansys_mapdl"
         return res
-    
+
     # ─────────────────────────────────────────────────────────────────────────
     # Persistence
     # ─────────────────────────────────────────────────────────────────────────
@@ -305,146 +303,150 @@ class FEAPoolRunner:
             pass   # pyarrow not installed — CSV is sufficient
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PLOT FUNCTION
-# ─────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# Smoke test — verify bearing-supported model gives physically sensible results
+# ──────────────────────────────────────────────────────────────────────────────
 
-def plot_fea_results(
-    df:       "pd.DataFrame",
-    ds:       "DesignSpace",
-    save_dir: str = ".",
-) -> None:
-    """
-    Three FEA batch-result diagnostic plots.
-    Fig 03a — Output distributions (deflection, stress, FoS, freq1)
-    Fig 03b — Deflection vs. R2 and L1
-    Fig 03c — Frequency vs. L2 + FoS histogram
-    """
-    import matplotlib.pyplot as plt
-    import os
 
-    NAVY="#0d1b2a"; TEAL="#00b4d8"; CORAL="#e63946"; GOLD="#ffd166"
-    MINT="#06d6a0"; GRAY="#8d99ae"
-    os.makedirs(save_dir, exist_ok=True)
-    plt.rcParams.update({
-        "figure.facecolor": "white", "axes.facecolor": "white",
-        "axes.edgecolor": GRAY, "axes.labelcolor": "navy",
-        "xtick.color": GRAY, "ytick.color": GRAY, "text.color": "navy",
-        "grid.color": "#2d4060", "grid.alpha": 0.4, "font.size": 9,
-    })
+# ────────────────────────────────────────────────────────────────────────────
+# PLOTS
+# ────────────────────────────────────────────────────────────────────────────
 
-    # Fig 03a: Output distributions
-    outputs = {
-        "static_max_deflection_um": ("Deflection [μm]", TEAL),
-        "static_max_vonmises_MPa":  ("Stress [MPa]",    CORAL),
-        "static_factor_of_safety":  ("Factor of Safety", GOLD),
-        "freq_mode1_Hz":            ("1st Freq [Hz]",   MINT),
-    }
-    fig, axes = plt.subplots(2, 2, figsize=(11, 7), facecolor="white")
-    fig.suptitle("Fig 03a — FEA Output Distributions", color="navy", y=1.01)
-    for ax, (col, (label, colour)) in zip(axes.flat, outputs.items()):
-        if col not in df.columns:
-            continue
-        data = df[col].dropna()
-        ax.set_facecolor("white")
-        ax.hist(data, bins=min(20, len(data)//2+1), color=colour, edgecolor=NAVY, alpha=0.85)
-        ax.axvline(data.mean(), color=GOLD, lw=1.5, linestyle="--",
-                   label=f"μ={data.mean():.2f}")
-        ax.axvline(data.median(), color="navy", lw=1.0, linestyle=":",
-                   label=f"med={data.median():.2f}")
-        ax.set_xlabel(label); ax.legend(fontsize=7.5)
-        ax.set_title(label, fontsize=9)
-    plt.tight_layout()
-    p = os.path.join(save_dir, "03a_fea_distributions.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white"); plt.close(fig)
-    print(f"  Saved → {p}")
 
-    # Fig 03b: Deflection sensitivity
-    fig, axes = plt.subplots(1, 2, figsize=(11, 5), facecolor="white")
-    fig.suptitle("Fig 03b — Deflection Sensitivity", color="navy")
-    defl = df["static_max_deflection_um"].values
-    for ax, var_nm, col in zip(axes, ["R2","L1"], [TEAL, CORAL]):
-        ax.set_facecolor("white")
-        cname = f"var_{var_nm}"
-        if cname not in df.columns:
-            continue
-        xd = df[cname].values
-        ax.scatter(xd, defl, s=18, c=col, alpha=0.65)
-        z = np.polyfit(xd, defl, 1)
-        xs = np.linspace(xd.min(), xd.max(), 100)
-        ax.plot(xs, np.poly1d(z)(xs), color=GOLD, lw=1.5, linestyle="--",
-                label=f"slope={z[0]:.2f} μm/mm")
-        ax.set_xlabel(f"{var_nm} [mm]"); ax.set_ylabel("Deflection [μm]")
-        ax.set_title(f"δ vs. {var_nm}", fontsize=9)
-        ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    p = os.path.join(save_dir, "03b_deflection_sensitivity.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white"); plt.close(fig)
-    print(f"  Saved → {p}")
 
-    # Fig 03c: Frequency vs L2 + FoS histogram
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 5), facecolor="white")
-    fig.suptitle("Fig 03c — Frequency & Safety Factor", color="navy")
-    for ax in (ax1, ax2):
-        ax.set_facecolor("white")
-    if "var_L2" in df.columns:
-        ax1.scatter(df["var_L2"], df["freq_mode1_Hz"], s=18, c=MINT, alpha=0.65)
-        z2 = np.polyfit(df["var_L2"], df["freq_mode1_Hz"], 1)
-        xs2 = np.linspace(df["var_L2"].min(), df["var_L2"].max(), 100)
-        ax1.plot(xs2, np.poly1d(z2)(xs2), color=GOLD, lw=1.5, linestyle="--",
-                 label=f"slope={z2[0]:.2f} Hz/mm")
-        ax1.set_xlabel("L2 [mm]"); ax1.set_ylabel("1st Nat. Freq [Hz]")
-        ax1.set_title("f₁ vs. L2", fontsize=9)
-        ax1.legend(fontsize=8); ax1.grid(True, alpha=0.3)
-    fos = df["static_factor_of_safety"].values
-    ax2.hist(fos, bins=min(20, len(fos)//2+1), color=GOLD, edgecolor=NAVY, alpha=0.85)
-    ax2.axvline(2.0, color=CORAL, lw=1.5, linestyle="--", label="FoS min = 2.0")
-    ax2.axvline(fos.mean(), color="navy", lw=1.0, linestyle=":", label=f"μ={fos.mean():.1f}")
-    ax2.set_xlabel("Factor of Safety"); ax2.legend(fontsize=8)
-    ax2.set_title("FoS Distribution", fontsize=9); ax2.grid(axis="y", alpha=0.3)
-    plt.tight_layout()
-    p = os.path.join(save_dir, "03c_frequency_fos.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white"); plt.close(fig)
-    print(f"  Saved → {p}")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PLOTS
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def plot_fea_results(df, ds, save_dir="."):
     """Fig 03a/b/c — FEA output distributions, deflection sensitivity, freq & FoS."""
     import matplotlib.pyplot as plt, os
-    NAVY="#0d1b2a"; TEAL="#00b4d8"; CORAL="#e63946"; GOLD="#ffd166"; MINT="#06d6a0"; GRAY="#8d99ae"
+    NAVY=C.NAVY; TEAL=C.TEAL; CORAL=C.RED; GOLD=C.ORANGE
+    MINT=C.GREEN; GRAY=C.GRAY; PURPLE=C.PURPLE
     os.makedirs(save_dir, exist_ok=True)
-    plt.rcParams.update({"figure.facecolor": "white","axes.facecolor": "white",
-        "axes.edgecolor":GRAY,"axes.labelcolor": "navy","xtick.color":GRAY,
-        "ytick.color":GRAY,"text.color": "navy","grid.color":"#2d4060","grid.alpha":0.4,"font.size":9})
+    apply_paper_theme()
 
     # 03a: output distributions
     outputs = {"static_max_deflection_um":("Deflection [μm]",TEAL),
                "static_max_vonmises_MPa":("Stress [MPa]",CORAL),
                "static_factor_of_safety":("FoS",GOLD),
                "freq_mode1_Hz":("f1 [Hz]",MINT)}
-    fig, axes = plt.subplots(2, 2, figsize=(11,7), facecolor="white")
-    fig.suptitle("Fig 03a — FEA Batch Output Distributions", color="navy", y=1.01)
+    fig, axes = plt.subplots(2, 2, figsize=(11,7), facecolor=C.BG)
+    fig.suptitle("Fig 03a — FEA Batch Output Distributions", color=C.TEXT, y=1.01)
     for ax,(col,(lbl,colour)) in zip(axes.flat, outputs.items()):
         if col not in df.columns: continue
-        data=df[col].dropna(); ax.set_facecolor("white")
+        data=df[col].dropna(); ax.set_facecolor(C.BG)
         ax.hist(data, bins=min(20,max(3,len(data)//2+1)), color=colour, edgecolor=NAVY, alpha=0.85)
         ax.axvline(data.mean(), color=GOLD, lw=1.5, linestyle="--", label=f"μ={data.mean():.2f}")
-        ax.axvline(data.median(), color="navy", lw=1.0, linestyle=":", label=f"med={data.median():.2f}")
+        ax.axvline(data.median(), color="white", lw=1.0, linestyle=":", label=f"med={data.median():.2f}")
         ax.set_xlabel(lbl); ax.legend(fontsize=7.5)
     plt.tight_layout()
     p=os.path.join(save_dir,"03a_fea_distributions.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white"); plt.close(fig); print(f"  Saved → {p}")
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=C.BG); plt.close(fig); print(f"  Saved → {p}")
 
     # 03b: deflection vs R2, L1
-    fig, axes = plt.subplots(1,2,figsize=(11,5), facecolor="white")
-    fig.suptitle("Fig 03b — Deflection Sensitivity", color="navy")
+    fig, axes = plt.subplots(1,2,figsize=(11,5), facecolor=C.BG)
+    fig.suptitle("Fig 03b — Deflection Sensitivity", color=C.TEXT)
     defl=df["static_max_deflection_um"].values
     for ax, vn, col in zip(axes, ["R2","L1"], [TEAL,CORAL]):
-        ax.set_facecolor("white")
+        ax.set_facecolor(C.BG)
         cn=f"var_{vn}"
         if cn not in df.columns: continue
         xd=df[cn].values; ax.scatter(xd, defl, s=16, c=col, alpha=0.65, edgecolors="none")
@@ -454,12 +456,12 @@ def plot_fea_results(df, ds, save_dir="."):
         ax.set_title(f"δ vs {vn}"); ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
     plt.tight_layout()
     p=os.path.join(save_dir,"03b_deflection_sensitivity.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white"); plt.close(fig); print(f"  Saved → {p}")
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=C.BG); plt.close(fig); print(f"  Saved → {p}")
 
     # 03c: freq vs L2 + FoS histogram
-    fig,(ax1,ax2) = plt.subplots(1,2,figsize=(11,5), facecolor="white")
-    fig.suptitle("Fig 03c — Frequency vs L2 & FoS", color="navy")
-    for ax in (ax1,ax2): ax.set_facecolor("white")
+    fig,(ax1,ax2) = plt.subplots(1,2,figsize=(11,5), facecolor=C.BG)
+    fig.suptitle("Fig 03c — Frequency vs L2 & FoS", color=C.TEXT)
+    for ax in (ax1,ax2): ax.set_facecolor(C.BG)
     if "var_L2" in df.columns:
         ax1.scatter(df["var_L2"], df["freq_mode1_Hz"], s=16, c=MINT, alpha=0.65, edgecolors="none")
         z2=np.polyfit(df["var_L2"],df["freq_mode1_Hz"],1)
@@ -472,14 +474,11 @@ def plot_fea_results(df, ds, save_dir="."):
     ax2.set_xlabel("Factor of Safety"); ax2.legend(fontsize=8); ax2.grid(axis="y", alpha=0.3)
     plt.tight_layout()
     p=os.path.join(save_dir,"03c_frequency_fos.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor="white"); plt.close(fig); print(f"  Saved → {p}")
+    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=C.BG); plt.close(fig); print(f"  Saved → {p}")
 
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Smoke test — verify bearing-supported model gives physically sensible results
-# ──────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    import os
     from design_variables import DesignSpace
     from lhs_sampler     import LHSSampler
 
@@ -518,3 +517,7 @@ if __name__ == "__main__":
     plot_fea_results(df, ds, save_dir="/tmp/spindle_plots")
     print("✅ FEA Pool Runner OK")
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PLOT FUNCTION
+# ─────────────────────────────────────────────────────────────────────────────
