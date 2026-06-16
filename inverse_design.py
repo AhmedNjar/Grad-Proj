@@ -33,8 +33,11 @@ from sklearn.metrics import mean_squared_error, r2_score
 
 try:
     import tensorflow as tf
-    from tensorflow import keras
-    from tensorflow.keras import layers, callbacks as k_cb
+    # Prefer accessing keras via the tensorflow package to avoid IDE/linter
+    # complaints about the tensorflow.keras namespace not being a direct module
+    keras = tf.keras
+    layers = keras.layers
+    k_cb = keras.callbacks
     TF_AVAILABLE = True
 except ImportError:
     TF_AVAILABLE = False

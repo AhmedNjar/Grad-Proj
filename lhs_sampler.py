@@ -328,8 +328,3 @@ if __name__ == "__main__":
     print("\nGenerating LHS plots...")
     plot_lhs_samples(X_lhs, ds, save_dir="/tmp/spindle_plots")
     print("\n✅ LHS sampler v2 OK")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# PLOT FUNCTION
-# ─────────────────────────────────────────────────────────────────────────────
