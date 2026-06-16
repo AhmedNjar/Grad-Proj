@@ -71,20 +71,20 @@ def _import_all():
 
     mods = {}
     mod_paths = {
-        "design_variables":    "01_design_variables",
-        "lhs_sampler":         "02_lhs_sampler",
-        "fea_pool_runner":     "03_fea_pool_runner",
-        "ml_surrogate":        "04_ml_surrogate",
-        "selective_assembly":  "07_selective_assembly",   # must be before robust_optimizer
-        "robust_optimizer":    "05_robust_optimizer",
-        "inverse_design":      "06_inverse_design",
-        "bearing_performance": "08_bearing_performance",
-        "shaft_runout":        "09_shaft_runout",
-        "rotor_eccentricity":  "10_rotor_eccentricity",
-        "final_report":        "11_final_report",
-        "tolerance_optimizer": "12_tolerance_optimizer",
-        "reliability_index":   "13_reliability_index",
-        "topsis_selector":     "14_topsis_selector",
+        "design_variables":    "design_variables",
+        "lhs_sampler":         "lhs_sampler",
+        "fea_pool_runner":     "fea_pool_runner",
+        "ml_surrogate":        "ml_surrogate",
+        "selective_assembly":  "selective_assembly",   # must be before robust_optimizer
+        "robust_optimizer":    "robust_optimizer",
+        "inverse_design":      "inverse_design",
+        "bearing_performance": "bearing_performance",
+        "shaft_runout":        "shaft_runout",
+        "rotor_eccentricity":  "rotor_eccentricity",
+        "final_report":        "final_report",
+        "tolerance_optimizer": "tolerance_optimizer",
+        "reliability_index":   "reliability_index",
+        "topsis_selector":     "topsis_selector",
     }
 
     # Add script directory to path so bare imports work
@@ -364,7 +364,7 @@ class RDOMasterOrchestrator:
         # Save correct CSV (catalog values, not raw optimizer)
         csv_path = self.out_dir / "optimal_design.csv"
         import csv
-        with open(csv_path, "w", newline="") as fh:
+        with open(csv_path, "w", newline="", encoding="utf-8") as fh:
             writer = csv.DictWriter(fh, fieldnames=list(mfg.keys()))
             writer.writeheader(); writer.writerow(mfg)
         log.info(f"✅ Optimal design saved → {csv_path}")
@@ -850,7 +850,7 @@ class RDOMasterOrchestrator:
         sp_pf    = dev_result.get("pos_tol_front")
         sp_pr    = dev_result.get("pos_tol_rear")
         # sp_bal is a DeviationParetoPoint — use best.it_journal for grade
-        with open(tol_path, "w", newline="") as fh:
+        with open(tol_path, "w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
             w.writerow(["feature","it_grade","it_value_um","upper_dev_um",
                         "lower_dev_um","iso_fit","clearance_um","tir_fit_um",
@@ -1033,9 +1033,9 @@ def parse_args():
         epilog=__doc__.split("Usage:")[1].split("Output files")[0] if "Usage:" in __doc__ else "",
     )
     p.add_argument("--mode",          choices=["full","ml_only","opt_only"], default="full")
-    p.add_argument("--n_samples",     type=int,   default=50)
+    p.add_argument("--n_samples",     type=int,   default=200)
     p.add_argument("--dry_run",       action="store_true")
-    p.add_argument("--surrogate",     choices=["gp","xgb","mlp","ensemble"], default="gp",
+    p.add_argument("--surrogate",     choices=["gp","xgb","mlp","ensemble"], default="ensemble",
                    help="ensemble = GP+GBR, recommended with --active_learning")
     # Active Learning / Adaptive DoE (Module 5)
     p.add_argument("--active_learning", action="store_true",
@@ -1062,11 +1062,15 @@ def parse_args():
                    help="Comma-separated 8 floats for TOPSIS objective weights "
                         "(default: equal weights). "
                         "Order: defl,stress,cost,weight,L10,speed,beta,chatter")
-    p.add_argument("--opt_method",    choices=["de","nsga2","nsga3"], default="de",
+    p.add_argument("--opt_method",    choices=["de","nsga2","nsga3"], default="nsga3",
                    help="de=fast sweep | nsga2=legacy | nsga3=recommended for 6-obj")
     p.add_argument("--output_dir",    default="rdo_results")
     p.add_argument("--no_plots",      action="store_true")
     p.add_argument("--n_rpm",         type=float, default=4000.0)
+    p.add_argument("--noise_force_cv",    type=float, default=0.10,
+                   help="Noise coefficient for force variability (default 0.10)")
+    p.add_argument("--noise_temp_max_c",  type=float, default=60.0,
+                   help="Maximum temperature noise [°C] (default 60.0)")
     p.add_argument("--fea_csv",       default=None)
     p.add_argument("--surrogate_pkl", default=None)
     return p.parse_args()

@@ -980,7 +980,7 @@ class RobustOptimizer:
           - F_preload_MA_N
         """
         import csv
-        with open(path, "w", newline="") as fh:
+        with open(path, "w", newline="", encoding="utf-8") as fh:
             writer = csv.DictWriter(fh, fieldnames=list(mfg_design.keys()))
             writer.writeheader()
             writer.writerow(mfg_design)

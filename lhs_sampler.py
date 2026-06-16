@@ -211,7 +211,7 @@ class LHSSampler:
 
         if fmt == "csv":
             import csv
-            with open(filepath, "w", newline="") as fh:
+            with open(filepath, "w", newline="", encoding="utf-8") as fh:
                 writer = csv.writer(fh)
                 writer.writerow(self.names)
                 writer.writerows(X)
@@ -221,7 +221,7 @@ class LHSSampler:
                 {n: float(v) for n, v in zip(self.names, row)}
                 for row in X
             ]
-            with open(filepath, "w") as fh:
+            with open(filepath, "w", encoding="utf-8") as fh:
                 json.dump(records, fh, indent=2)
 
         else:

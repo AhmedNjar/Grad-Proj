@@ -257,6 +257,16 @@ class FEAPoolRunner:
 
         v = self.design_space.decode_vector(x)
 
+        # Derive K_radial and K_axial from catalog (v4 fix)
+        from design_variables import snap_to_skf_bearing
+        import math as _math
+        R2 = v["R2"]
+        brg_front, _, _ = snap_to_skf_bearing(R2, "ACBB", 4000.0, "grease")
+        
+        alpha_rad = _math.radians(brg_front.contact_angle_deg)
+        K_radial = 1.7 * brg_front.radial_stiffness_single_N_mm
+        K_axial  = 1.7 * brg_front.radial_stiffness_single_N_mm * _math.tan(alpha_rad)**2
+
         case = SimulationCase(
             case_id  = case_id,
             geometry = SpindleGeometry(
@@ -271,7 +281,7 @@ class FEAPoolRunner:
             bearings = BearingConfig(
                 front_z_fraction=v["front_z_fraction"],
                 rear_z_fraction =v["rear_z_fraction"],
-                K_radial=v["K_radial"], K_axial=v["K_axial"],
+                K_radial=K_radial, K_axial=K_axial,
             ),
             loads    = CuttingLoads(Ft=v["Ft"], Fr=v["Fr"], Ff=v["Ff"]),
             mesh     = MeshConfig(),

@@ -766,7 +766,7 @@ class PostProcessor:
 
         # ---- Save frequencies to CSV ----
         freq_csv = str(self.out / f"case{self.cid}_natural_frequencies.csv")
-        with open(freq_csv, "w", newline="") as fh:
+        with open(freq_csv, "w", newline="", encoding="utf-8") as fh:
             writer = csv.writer(fh)
             writer.writerow(["Mode", "Frequency_Hz"])
             for i, f in enumerate(frequencies, 1):
@@ -917,7 +917,7 @@ class SpindleSimulation:
                 if k not in all_keys:
                     all_keys.append(k)
 
-        with open(csv_path, "w", newline="") as fh:
+        with open(csv_path, "w", newline="", encoding="utf-8") as fh:
             writer = csv.DictWriter(fh, fieldnames=all_keys, extrasaction="ignore")
             writer.writeheader()
             for row in self._all_results:
@@ -927,7 +927,7 @@ class SpindleSimulation:
 
         # Also save as JSON for programmatic access
         json_path = Path(self.output_dir) / "master_summary.json"
-        with open(json_path, "w") as fh:
+        with open(json_path, "w", encoding="utf-8") as fh:
             json.dump(self._all_results, fh, indent=2, default=str)
         log.info("JSON summary saved to: %s", json_path)
 

@@ -59,7 +59,7 @@
 from __future__ import annotations
 import math
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Union
+from typing import ClassVar, Dict, List, Optional, Tuple, Union
 import numpy as np
 
 
@@ -122,7 +122,7 @@ class Bearing:
     # Published preload-stiffness multipliers (vs medium preload = 1.0)
     # Source: SKF/FAG technical guides; Palmgren (1959) bearing approximation
     # Measured range: light preload ~0.55×, medium ~1.0×, heavy ~1.40×
-    _PRELOAD_FACTOR: "ClassVar[Dict[str, float]]" = {
+    _PRELOAD_FACTOR: ClassVar[Dict[str, float]] = {
         "A": 0.55,   # light  — minimal thermal runout, highest speed rating
         "B": 1.00,   # medium — balanced rigidity / speed (default for lathe spindle)
         "C": 1.40,   # heavy  — maximum stiffness, lowest speed, highest heat generation
