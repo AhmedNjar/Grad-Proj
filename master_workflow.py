@@ -1028,60 +1028,87 @@ class RDOMasterOrchestrator:
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="TechPulse Spindle RDO — Master Workflow v2",
+        description="TechPulse Spindle RDO — Master Workflow v3",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__.split("Usage:")[1].split("Output files")[0] if "Usage:" in __doc__ else "",
     )
-    p.add_argument("--mode",          choices=["full","ml_only","opt_only"], default="full")
-    p.add_argument("--n_samples",     type=int,   default=200)
-    p.add_argument("--dry_run",       action="store_true")
-    p.add_argument("--surrogate",     choices=["gp","xgb","mlp","ensemble"], default="ensemble",
-                   help="ensemble = GP+GBR, recommended with --active_learning")
-    # Active Learning / Adaptive DoE (Module 5)
+    # ── Core ──────────────────────────────────────────────────────────────
+    p.add_argument("--mode", default="full",
+                   choices=["full", "ml_only", "opt_only", "from_surrogate"],
+                   help="full=complete pipeline | ml_only=train surrogate only | "
+                        "opt_only=optimise only | from_surrogate=skip FEA, resume "
+                        "from saved surrogate pkl + fea csv")
+    p.add_argument("--n_samples",     type=int,   default=200,
+                   help="Number of LHS samples for FEA pool (default 200)")
+    p.add_argument("--dry_run",       action="store_true",
+                   help="Use fast analytical solver instead of ANSYS")
+    p.add_argument("--output_dir",    default="rdo_results",
+                   help="Directory for all outputs (default rdo_results)")
+    p.add_argument("--no_plots",      action="store_true",
+                   help="Skip all matplotlib figure generation")
+    p.add_argument("--n_rpm",         type=float, default=4000.0,
+                   help="Operating spindle speed [rpm] (default 4000)")
+
+    # ── Noise / robustness ────────────────────────────────────────────────
+    p.add_argument("--noise_force_cv",   type=float, default=0.10,
+                   help="Coefficient of variation for cutting-force scatter "
+                        "(default 0.10 = 10%%)")
+    p.add_argument("--noise_temp_max_c", type=float, default=60.0,
+                   help="Maximum operating temperature rise ΔT [°C] "
+                        "(default 60.0)")
+
+    # ── Surrogate ─────────────────────────────────────────────────────────
+    p.add_argument("--surrogate", default="ensemble",
+                   choices=["gp", "xgb", "mlp", "ensemble"],
+                   help="Surrogate model type (default gp; "
+                        "ensemble=GP+GBR recommended with --active_learning)")
+    p.add_argument("--fea_csv",       default=None,
+                   help="Path to saved FEA results CSV "
+                        "(required for --mode from_surrogate)")
+    p.add_argument("--surrogate_pkl", default=None,
+                   help="Path to saved surrogate .pkl "
+                        "(required for --mode from_surrogate)")
+
+    # ── Active Learning ───────────────────────────────────────────────────
     p.add_argument("--active_learning", action="store_true",
                    help="Enable uncertainty-driven Adaptive DoE after initial training")
     p.add_argument("--al_rounds",     type=int, default=2,
                    help="Number of Active Learning rounds (default 2)")
     p.add_argument("--al_n_select",   type=int, default=8,
-                   help="High-uncertainty candidates added per AL round (default 8)")
+                   help="New FEA samples added per AL round (default 8)")
     p.add_argument("--al_pool_size",  type=int, default=300,
                    help="LHS candidate pool size per AL round (default 300)")
-    # Chatter Stability (Module 9, option C: constraint + objective f8)
-    p.add_argument("--chatter_Ks",         type=float, default=2500.0,
-                   help="Specific cutting force coefficient [N/mm^2] (default 2500, steel)")
-    p.add_argument("--chatter_zeta",       type=float, default=0.03,
-                   help="Structural damping ratio (default 0.03)")
-    p.add_argument("--chatter_b_required", type=float, default=2.0,
-                   help="Required stable axial depth of cut [mm] (default 2.0)")
-    # TOPSIS knee-point weights (Module 14)
-    p.add_argument("--manufacturer", type=str, default=None,
-                   choices=["SKF","FAG","NSK","NTN","JTEKT","Timken",None],
-                   help="Restrict bearing selection to one manufacturer "
-                        "(default: None = best across all manufacturers)")
+
+    # ── Optimisation ──────────────────────────────────────────────────────
+    p.add_argument("--opt_method", default="nsga3",
+                   choices=["de", "nsga2", "nsga3"],
+                   help="Optimisation algorithm "
+                        "(nsga3=recommended for 8 objectives | "
+                        "de=fast weighted-sum sweep | nsga2=legacy)")
     p.add_argument("--topsis_weights", type=str, default=None,
-                   help="Comma-separated 8 floats for TOPSIS objective weights "
-                        "(default: equal weights). "
-                        "Order: defl,stress,cost,weight,L10,speed,beta,chatter")
-    p.add_argument("--opt_method",    choices=["de","nsga2","nsga3"], default="nsga3",
-                   help="de=fast sweep | nsga2=legacy | nsga3=recommended for 6-obj")
-    p.add_argument("--output_dir",    default="rdo_results")
-    p.add_argument("--no_plots",      action="store_true")
-    p.add_argument("--n_rpm",         type=float, default=4000.0)
-    p.add_argument("--noise_force_cv",    type=float, default=0.10,
-                   help="Noise coefficient for force variability (default 0.10)")
-    p.add_argument("--noise_temp_max_c",  type=float, default=60.0,
-                   help="Maximum temperature noise [°C] (default 60.0)")
-    p.add_argument("--fea_csv",       default=None)
-    p.add_argument("--surrogate_pkl", default=None)
+                   help="Comma-separated 8 floats for TOPSIS weights "
+                        "(order: defl,stress,cost,weight,L10,speed,beta,chatter). "
+                        "Default: equal weights. Example: '1,1,1,1,2,1,2,1'")
+
+    # ── Chatter stability ─────────────────────────────────────────────────
+    p.add_argument("--chatter_Ks",          type=float, default=2500.0,
+                   help="Specific cutting force [N/mm²] (default 2500 = steel)")
+    p.add_argument("--chatter_zeta",        type=float, default=0.03,
+                   help="Structural damping ratio (default 0.03)")
+    p.add_argument("--chatter_b_required",  type=float, default=2.0,
+                   help="Required stable axial depth of cut [mm] (default 2.0)")
+
+    # ── Bearing manufacturer ──────────────────────────────────────────────
+    p.add_argument("--manufacturer", type=str, default=None,
+                   choices=["SKF", "FAG", "NSK", "NTN", "JTEKT", "Timken", None],
+                   help="Lock bearing selection to one manufacturer. "
+                        "Default None = best C_r across all 6 manufacturers.")
+
     return p.parse_args()
 
 
 def main():
     args   = parse_args()
-    config = vars(args)
-    config["dry_run"]          = args.dry_run
-    config["noise_force_cv"]   = args.noise_force_cv
-    config["noise_temp_max_c"] = args.noise_temp_max_c
+    config = vars(args)   # all CLI args already in config via vars()
 
     orch = RDOMasterOrchestrator(config)
 
@@ -1089,6 +1116,9 @@ def main():
     elif args.mode == "ml_only":         orch.run_ml_only()
     elif args.mode == "from_surrogate":  orch.run_from_surrogate()
     elif args.mode == "opt_only":        orch.run_opt_only()
+    else:
+        print(f"Unknown mode: {args.mode}")
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
