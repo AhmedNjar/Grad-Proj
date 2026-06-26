@@ -48,6 +48,7 @@ except ImportError:
 
 from design_variables import DesignSpace
 from plot_theme import apply_paper_theme, C, savefig_paper
+from design_variables import snap_to_skf_bearing
 
 log = logging.getLogger("FEA_Pool")
 logging.basicConfig(level=logging.INFO, format="%(levelname)-8s %(message)s")
@@ -173,8 +174,7 @@ class FEAPoolRunner:
         # ── Reaction forces (BUG-11 FIX) ─────────────────────────────────────
         # K_radial is no longer a design variable (removed in v4).
         # Derive from catalog via snap_to_skf_bearing using R2.
-        from design_variables import snap_to_skf_bearing
-        import math as _math
+        # (snap_to_skf_bearing imported at module level)
         brg_front, _, _ = snap_to_skf_bearing(R2, "ACBB", 4000.0, "grease")
         K_fr = 1.7 * brg_front.radial_stiffness_single_N_mm     # DB pair [N/mm]
         K_re = 1.7 * brg_front.radial_stiffness_single_N_mm * 0.9  # rear CRB slightly softer
@@ -228,24 +228,31 @@ class FEAPoolRunner:
         freq1_Hz = 1.0 / np.sqrt(max(dunkerly_inv, 1e-20))
 
         # Approximate higher modes (scaled from mode 1)
+        # Mode scaling: theoretical ratio for pinned-pinned beam = n²
+        # For spindle with bearing supports: empirical ≈ 2.76, 5.40
+        # (ANSYS MAPDL gives exact values; these are 1st-order approximations)
+        # Mode scaling: empirical ratios for spindle with bearing supports
+        # (pinned-pinned beam theory: ×4, ×9 — spindle: ≈×2.76, ×5.40)
+        # ANSYS gives exact values; these are 1st-order approximations.
         freq2_Hz = freq1_Hz * 2.76
         freq3_Hz = freq1_Hz * 5.40
 
         # ── Assemble result ───────────────────────────────────────────────────
-        var_dict = self.design_space.decode_vector(x)
         result   = {
             "case_id":                    case_id,
             "mode":                       "analytical_v2",
             "total_length_mm":            L_total,
             "static_max_deflection_um":   float(delta_nose_um),
-            "static_max_vonmises_MPa":    float(sigma_MPa),
+            # Note: this is bending stress σ=M·R/I (not full Von Mises incl. shear)
+            # Column kept as "static_max_vonmises_MPa" for downstream compatibility
+            "static_max_vonmises_MPa":    float(sigma_MPa),  # bending stress [MPa]
             "static_factor_of_safety":    float(fos),
             "freq_mode1_Hz":              float(freq1_Hz),
             "freq_mode2_Hz":              float(freq2_Hz),
             "freq_mode3_Hz":              float(freq3_Hz),
         }
         # Prefix all design-variable columns with "var_" for downstream code
-        result.update({f"var_{k}": float(v_) for k, v_ in var_dict.items()})
+        result.update({f"var_{k}": float(v_) for k, v_ in v.items()})
         return result
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -256,16 +263,6 @@ class FEAPoolRunner:
             raise RuntimeError("PyMAPDL not available. Use dry_run=True.")
 
         v = self.design_space.decode_vector(x)
-
-        # Derive K_radial and K_axial from catalog (v4 fix)
-        from design_variables import snap_to_skf_bearing
-        import math as _math
-        R2 = v["R2"]
-        brg_front, _, _ = snap_to_skf_bearing(R2, "ACBB", 4000.0, "grease")
-        
-        alpha_rad = _math.radians(brg_front.contact_angle_deg)
-        K_radial = 1.7 * brg_front.radial_stiffness_single_N_mm
-        K_axial  = 1.7 * brg_front.radial_stiffness_single_N_mm * _math.tan(alpha_rad)**2
 
         case = SimulationCase(
             case_id  = case_id,
@@ -281,7 +278,7 @@ class FEAPoolRunner:
             bearings = BearingConfig(
                 front_z_fraction=v["front_z_fraction"],
                 rear_z_fraction =v["rear_z_fraction"],
-                K_radial=K_radial, K_axial=K_axial,
+                K_radial=v["K_radial"], K_axial=v["K_axial"],
             ),
             loads    = CuttingLoads(Ft=v["Ft"], Fr=v["Fr"], Ff=v["Ff"]),
             mesh     = MeshConfig(),

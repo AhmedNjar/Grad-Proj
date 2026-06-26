@@ -109,7 +109,7 @@ def default_limit_states(
     n_rpm:            float = 4000.0,
 ) -> List[LimitState]:
     """
-    Build the standard set of 5 spindle limit states.
+    Build the standard set of 4 spindle limit states.
 
     Returns list ordered by engineering importance.
     """
@@ -309,7 +309,10 @@ class ReliabilityAnalyser:
             beta_min_r  = min(beta_results, key=lambda r: r.beta)
         else:
             pf_system = 1.0; beta_system = 0.0
-            beta_min_r = BetaResult("None","",0,"",0,0,0,1,3,0)
+            beta_min_r = BetaResult(
+                name="None", output_name="", limit=0, unit="",
+                beta=0, mean_g=0, std_g=0, pf=1, beta_target=3, n_samples=0,
+            )
 
         return SystemReliability(
             beta_results  = beta_results,
@@ -351,7 +354,9 @@ class ReliabilityAnalyser:
 
         # Temperature softening
         dT = rng.uniform(0, noise_temp_max_C, n_mc)
-        for vname, alpha in [("E", 3.2e-4), ("sigma_y", 4.0e-4)]:
+        # P1 fix: alpha_E corrected to match 05_robust_optimizer.py
+        # (ASM Handbook Vol.1, 4140 steel — was 3.2e-4, now 2.2e-4)
+        for vname, alpha in [("E", 2.2e-4), ("sigma_y", 4.0e-4)]:
             if vname in vnames:
                 idx = vnames.index(vname)
                 X_noisy[:, idx] *= (1.0 - alpha * dT)
@@ -396,8 +401,7 @@ def plot_reliability_gauges(
     import os
 
     NAVY=C.NAVY; TEAL=C.TEAL; CORAL=C.RED; GOLD=C.ORANGE
-    MINT=C.GREEN; GRAY=C.GRAY; ORANGE=C.ORANGE
-    MINT=C.GREEN; GRAY=C.GRAY; PURPLE=C.PURPLE
+    MINT=C.GREEN; GRAY=C.GRAY; ORANGE=C.ORANGE; PURPLE=C.PURPLE
 
     os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
     apply_paper_theme()
@@ -416,7 +420,7 @@ def plot_reliability_gauges(
                              figsize=(5.5*ncols, 4.5*nrows),
                              facecolor=C.BG)
     axes_flat = list(np.array(axes).flatten()) if nrows > 1 or ncols > 1 else [axes]
-    fig.suptitle(f"Reliability Index β — FOSM Analysis\n{design_name}", color=C.TEXT, fontsize=12, fontweight="bold", y=1.01)
+    fig.suptitle(f"Reliability Index β — MC Second-Moment Method\n{design_name}", color=C.TEXT, fontsize=12, fontweight="bold", y=1.01)
 
     def draw_gauge(ax, result):
         ax.set_facecolor(C.BG)
@@ -516,8 +520,7 @@ def plot_beta_vs_samples(
     import os
 
     NAVY=C.NAVY; TEAL=C.TEAL; CORAL=C.RED; GOLD=C.ORANGE
-    MINT=C.GREEN; GRAY=C.GRAY; ORANGE=C.ORANGE
-    MINT=C.GREEN; GRAY=C.GRAY; PURPLE=C.PURPLE
+    MINT=C.GREEN; GRAY=C.GRAY; ORANGE=C.ORANGE; PURPLE=C.PURPLE
     COLS = [TEAL, CORAL, GOLD, MINT, "#7400b8", "#fb8500"]
 
     os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)

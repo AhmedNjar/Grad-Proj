@@ -42,6 +42,10 @@ from bearing_catalog import (
 )
 
 
+# Palmgren stiffness formula coefficients (calibrated to medium preload, d>75mm)
+PALMGREN_ACBB_COEF  = 5.5   # ACBB: k = coef × d^0.75 × 1000 [N/mm]
+PALMGREN_CRB_COEF   = 8.0   # CRB:  k = coef × d^0.80 × 1000 [N/mm]
+BORE_SIZE_CORR_REF  = 75.0  # reference bore [mm] for size correction
 # ─────────────────────────────────────────────────────────────────────────────
 # 1.  ASYMMETRIC TOLERANCE
 # ─────────────────────────────────────────────────────────────────────────────
@@ -91,6 +95,7 @@ class AsymmetricTolerance:
 # ─────────────────────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
+# LEGACY: use bearing_catalog.Bearing for new code (manufacturer-agnostic)
 class SKFBearing:
     designation:       str
     d:                 float
@@ -164,6 +169,7 @@ SKF_CATALOG = SKF_ACBB_CATALOG
 # ─────────────────────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
+# LEGACY: use bearing_catalog.Bearing for new code
 class SKFCRBBearing:
     designation:     str
     d:               float
@@ -232,6 +238,7 @@ def _best_at_bore(bore: float, catalog_dict) -> object:
     candidates = [b for cat in catalog_dict.values() for b in cat if b.d == bore]
     return max(candidates, key=lambda b: b.C_r)
 
+# Dict value is Union[SKFBearing, bearing_catalog.Bearing] — "object" for compat
 _ACBB_BY_BORE: Dict[float, object] = {
     d: _best_at_bore(d, ACBB_CATALOG) for d in ALL_ACBB_BORES
 }

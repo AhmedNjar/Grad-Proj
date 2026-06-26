@@ -604,6 +604,7 @@ class RDOMasterOrchestrator:
     # ─────────────────────────────────────────────────────────────────────────
     # Stage 6 — Bearing Performance
     # ─────────────────────────────────────────────────────────────────────────
+    # Not in run_full pipeline — call manually after stage_bearing_performance if needed
     def stage_manufacturer_comparison(
         self,
         bore_radius_mm: float,
@@ -1037,8 +1038,8 @@ def parse_args():
                    help="full=complete pipeline | ml_only=train surrogate only | "
                         "opt_only=optimise only | from_surrogate=skip FEA, resume "
                         "from saved surrogate pkl + fea csv")
-    p.add_argument("--n_samples",     type=int,   default=200,
-                   help="Number of LHS samples for FEA pool (default 200)")
+    p.add_argument("--n_samples",     type=int,   default=100,
+                   help="Number of LHS samples for FEA pool (default 100)")
     p.add_argument("--dry_run",       action="store_true",
                    help="Use fast analytical solver instead of ANSYS")
     p.add_argument("--output_dir",    default="rdo_results",
@@ -1059,7 +1060,7 @@ def parse_args():
     # ── Surrogate ─────────────────────────────────────────────────────────
     p.add_argument("--surrogate", default="ensemble",
                    choices=["gp", "xgb", "mlp", "ensemble"],
-                   help="Surrogate model type (default gp; "
+                   help="Surrogate model type (default ensemble; "
                         "ensemble=GP+GBR recommended with --active_learning)")
     p.add_argument("--fea_csv",       default=None,
                    help="Path to saved FEA results CSV "

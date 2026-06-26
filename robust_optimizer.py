@@ -88,6 +88,10 @@ class OptimizationResult:
     topsis_result:      Optional[object] = None   # TOPSISResult (Module 14)
 
 
+# Penalty constants — named for clarity (magic numbers eliminated)
+CHATTER_PENALTY_USD_PER_UNIT = 2000.0  # USD per unit chatter ratio excess (f8>1)
+BORE_SNAP_PENALTY_USD_PER_MM = 500.0   # USD per mm bore-catalog deviation
+
 class RobustOptimizer:
     """
     Robust Design Optimization: GA + Taguchi S/N + Cost + Selective Assembly.
@@ -441,8 +445,7 @@ class RobustOptimizer:
         self,
         x:   np.ndarray,
         sn:  dict,
-        n_mc: int = 50,
-    ) -> float:
+    ) -> float:  # n_mc param unused: β from sn dict directly (no extra MC needed)
         """
         Fast FOSM system reliability index from Taguchi S/N means + stds.
 
@@ -458,14 +461,6 @@ class RobustOptimizer:
         """
         from scipy import stats as scipy_stats
         import math as _math
-
-        # Limit states: (output_name, limit, sign)
-        # sign=+1: failure when Y > limit (deflection, stress, speed_ratio)
-        # sign=-1: failure when Y < limit (FoS, freq margin)
-        limit_states = [
-            ("static_max_deflection_um",  self.design_space.get_bounds()[
-                self.design_space.get_variable_names().index("L1"), 0], +1),
-        ]
 
         # Use surrogate output means and stds directly from sn dict
         _LIMITS_SIGN = {
@@ -553,7 +548,7 @@ class RobustOptimizer:
         f3         = cost_dict["total_usd"]
         bore_raw   = var_dict["R2"] * 2.0
         nearest    = int(np.argmin(np.abs(_ACBB_BORES - bore_raw)))
-        f3        += 500.0 * abs(bore_raw - _ACBB_BORES[nearest])
+        f3        += BORE_SNAP_PENALTY_USD_PER_MM * abs(bore_raw - _ACBB_BORES[nearest])
 
         # ── f4: Mass ──────────────────────────────────────────────────────
         ri     = var_dict["ri"]
@@ -589,7 +584,7 @@ class RobustOptimizer:
         f8       = self.chatter_b_required / b_lim   # <1 stable, >1 unstable
 
         # CONSTRAINT: penalise unstable designs (f8>1) via cost f3
-        chatter_penalty = max(0.0, f8 - 1.0) * 2000.0   # USD per unit excess
+        chatter_penalty = max(0.0, f8 - 1.0) * CHATTER_PENALTY_USD_PER_UNIT
         f3             += chatter_penalty
 
         return np.array([f1, f2, f3, f4, f5, f6, f7, f8])
