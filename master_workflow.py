@@ -979,7 +979,7 @@ class RDOMasterOrchestrator:
                                   ecc_result, fea_row, n_rpm=n_rpm,
                                   design_name="Optimised Spindle Design")
         rpt_path = self.out_dir / "optimal_design_report.txt"
-        rpt_path.write_text(buf.getvalue())
+        rpt_path.write_text(buf.getvalue(), encoding="utf-8")
         log.info(f"   Report saved → {rpt_path}")
 
         if not self.config["no_plots"]:
