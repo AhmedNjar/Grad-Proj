@@ -500,6 +500,7 @@ class ToleranceOptimizer:
         corners = np.eye(3)
         return np.vstack([raw, corners])
 
+    # Note: name is legacy — actually brute-force over discrete combinations
     def _optimise_continuous(
         self,
         it_j: str, it_b: str, it_l: str,
@@ -538,6 +539,7 @@ class ToleranceOptimizer:
         all_points: List[TolerancePoint] = []
         weight_vecs = self._weight_vectors()
 
+        # Order: (shaft journal, inner bore, spacer, housing) — 4^4 = 256 combos
         combos = list(product(JOURNAL_GRADES, BORE_GRADES, LENGTH_GRADES, HOUSING_GRADES))
         if verbose:
             print(f"\n  Tolerance Optimizer: {len(combos)} IT combos "
