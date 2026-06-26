@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 import logging
+import math
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -264,6 +265,14 @@ class FEAPoolRunner:
 
         v = self.design_space.decode_vector(x)
 
+        # K_radial and K_axial are no longer design variables (v4).
+        # Derive from catalog via snap_to_skf_bearing using R2.
+        R2 = v["R2"]
+        brg_front, _, _ = snap_to_skf_bearing(R2, "ACBB", 4000.0, "grease")
+        alpha = math.radians(brg_front.contact_angle_deg)
+        K_radial = 1.7 * brg_front.radial_stiffness_single_N_mm       # pair stiffness [N/mm]
+        K_axial  = 1.7 * brg_front.radial_stiffness_single_N_mm * math.tan(alpha)**2
+
         case = SimulationCase(
             case_id  = case_id,
             geometry = SpindleGeometry(
@@ -278,19 +287,32 @@ class FEAPoolRunner:
             bearings = BearingConfig(
                 front_z_fraction=v["front_z_fraction"],
                 rear_z_fraction =v["rear_z_fraction"],
-                K_radial=v["K_radial"], K_axial=v["K_axial"],
+                K_radial=K_radial, K_axial=K_axial,
             ),
             loads    = CuttingLoads(Ft=v["Ft"], Fr=v["Fr"], Ff=v["Ff"]),
             mesh     = MeshConfig(),
             modal    = ModalConfig(num_modes=6),
         )
 
+        # ... (نفس الكود بالأعلى)
         sim = SpindleSimulation(output_dir=str(self.output_dir / f"case_{case_id:04d}"))
         sim.start()
         try:
             res = sim.run_case(case)
         finally:
             sim.close()
+            # --------- التعديل: تنظيف المساحة فوراً بعد انتهاء التحليل ---------
+            import glob, os
+            case_dir = str(self.output_dir / f"case_{case_id:04d}")
+            # تحديد امتدادات ملفات MAPDL الضخمة التي لا نحتاجها بعد استخراج النتائج
+            junk_extensions = ["*.rst", "*.db", "*.emat", "*.esav", "*.err", "*.log", "*.page"]
+            for ext in junk_extensions:
+                for f in glob.glob(os.path.join(case_dir, ext)):
+                    try:
+                        os.remove(f)
+                    except Exception as e:
+                        pass
+            # -------------------------------------------------------------------
 
         res.update({f"var_{k}": float(v_) for k, v_ in v.items()})
         res["mode"] = "ansys_mapdl"

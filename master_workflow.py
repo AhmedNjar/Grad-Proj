@@ -19,7 +19,7 @@
       python master_workflow.py --mode opt_only --surrogate_pkl rdo_results/surrogate.pkl
 
   Flags:
-      --n_samples     Number of LHS DoE points           [default 50]
+      --n_samples     Number of LHS DoE points           [default 200]
       --dry_run       Use analytical beam model (no ANSYS) [flag]
       --surrogate     gp | xgb | mlp                     [default gp]
       --opt_method    de | nsga2                         [default de]
@@ -148,21 +148,71 @@ class RDOMasterOrchestrator:
     # Stage 1 — LHS Sampling
     # ─────────────────────────────────────────────────────────────────────────
     def stage_lhs(self) -> np.ndarray:
-        log.info("\n── STAGE 1: LHS SAMPLING ──────────────────────────────────────")
+        log.info("\n── STAGE 1: SMART LHS SAMPLING (WITH DEDUPLICATION) ───────────")
         M       = self.m
         sampler = M["lhs_sampler"].LHSSampler(self.ds)
-        n       = self.config["n_samples"]
-        X       = sampler.generate_lhs(n, criterion="maximin", seed=42)
-        path    = self.out_dir / "lhs_samples.csv"
+        n_target = self.config["n_samples"]
+        csv_path = self.out_dir / "fea_results.csv"
+
+        # 1. قراءة الملف القديم إن وجد لمعرفة الأجزاء التي تم حسابها مسبقاً
+        existing_vars = []
+        var_cols = []
+        if csv_path.exists():
+            try:
+                df_existing = pd.read_csv(csv_path)
+                var_cols = [c for c in df_existing.columns if c.startswith("var_")]
+                if var_cols:
+                    existing_vars = df_existing[var_cols].values
+                    log.info(f"   Found {len(existing_vars)} existing records in CSV. Skipping duplicates...")
+            except Exception as e:
+                log.warning(f"   Could not read existing CSV: {e}")
+
+        # 2. توليد عينات وتخطي المكرر حتى نصل للعدد المطلوب من الأجزاء الجديدة
+        new_samples = []
+        batch_size = n_target * 5  # توليد عينات بزيادة للفلترة
+        seed_offset = 42
+
+        while len(new_samples) < n_target:
+            X_pool = sampler.generate_lhs(batch_size, criterion="maximin", seed=seed_offset)
+            seed_offset += 1
+
+            for x in X_pool:
+                if len(new_samples) >= n_target:
+                    break
+                
+                # فك تشفير الأبعاد لمقارنتها بالقيم الحقيقية
+                v = self.ds.decode_vector(x)
+                if not var_cols: 
+                    var_cols = [f"var_{k}" for k in v.keys()]
+                    
+                v_array = np.array([v[c.replace("var_", "")] for c in var_cols])
+
+                # التحقق: هل هذه الأبعاد موجودة مسبقاً؟
+                is_duplicate = False
+                if len(existing_vars) > 0:
+                    # حساب الفرق بين الأبعاد الحالية وكل الأبعاد السابقة (تسامح 1e-4 للأرقام العشرية)
+                    distances = np.linalg.norm(existing_vars - v_array, axis=1)
+                    if np.any(distances < 1e-4):  
+                        is_duplicate = True
+
+                if not is_duplicate:
+                    new_samples.append(x)
+                    # إضافة الجزء الجديد للقائمة المؤقتة لمنع تكراره في نفس الـ Loop
+                    if len(existing_vars) > 0:
+                        existing_vars = np.vstack([existing_vars, v_array])
+                    else:
+                        existing_vars = np.array([v_array])
+
+        X = np.array(new_samples)
+        path = self.out_dir / "lhs_samples.csv"
         sampler.save_samples(X, str(path), fmt="csv")
-        log.info(f"✅ {n} LHS samples saved → {path}")
+        log.info(f"✅ {n_target} NEW LHS samples generated & saved → {path}")
 
         if not self.config["no_plots"]:
             log.info("   Generating LHS plots...")
             M["lhs_sampler"].plot_lhs_samples(X, self.ds, save_dir=str(self.plot_dir))
 
         return X
-
     # ─────────────────────────────────────────────────────────────────────────
     # Stage 2 — FEA Pool
     # ─────────────────────────────────────────────────────────────────────────
@@ -176,11 +226,23 @@ class RDOMasterOrchestrator:
         )
         t0 = time.time()
         df = runner.execute_batch(max_failures=10, save_interval=20)
+        # ... (نفس الكود بالأعلى)
         elapsed = time.time() - t0
 
+        if df.empty:
+            log.error("❌ FEA batch produced 0 successful cases. Check FEA errors above.")
+            raise RuntimeError("FEA batch failed to produce any results.")
+
         path = self.out_dir / "fea_results.csv"
+        
+        # --- التعديل: الدمج مع الملف القديم بدل مسحه ---
+        if path.exists():
+            old_df = pd.read_csv(path)
+            df = pd.concat([old_df, df], ignore_index=True)
+
         df.to_csv(path, index=False)
-        log.info(f"✅ {len(df)} FEA cases in {elapsed:.1f}s → {path}")
+        log.info(f"✅ Total {len(df)} FEA cases (including historical) → {path}")
+        # ... (باقي الكود بالأسفل كما هو)
         log.info(f"   δ: {df['static_max_deflection_um'].mean():.1f} μm  "
                  f"σ: {df['static_max_vonmises_MPa'].mean():.1f} MPa  "
                  f"f1: {df['freq_mode1_Hz'].mean():.0f} Hz")
@@ -1038,8 +1100,8 @@ def parse_args():
                    help="full=complete pipeline | ml_only=train surrogate only | "
                         "opt_only=optimise only | from_surrogate=skip FEA, resume "
                         "from saved surrogate pkl + fea csv")
-    p.add_argument("--n_samples",     type=int,   default=100,
-                   help="Number of LHS samples for FEA pool (default 100)")
+    p.add_argument("--n_samples",     type=int,   default=200,
+                   help="Number of LHS samples for FEA pool (default 200)")
     p.add_argument("--dry_run",       action="store_true",
                    help="Use fast analytical solver instead of ANSYS")
     p.add_argument("--output_dir",    default="rdo_results",

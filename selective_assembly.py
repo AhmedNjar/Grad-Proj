@@ -52,7 +52,7 @@ import pandas as pd
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Optional, Tuple
 import logging
-from plot_theme import apply_paper_theme, C, savefig_paper
+from plot_theme import apply_paper_theme, C, patch_ax, savefig_paper
 
 log = logging.getLogger("SelectiveAssembly")
 
@@ -591,6 +591,7 @@ def plot_selective_assembly(
         ax_before, ax_after = row_axes[0], row_axes[1]
         for ax in (ax_before, ax_after):
             ax.set_facecolor(C.BG)
+            patch_ax(ax)
         σ_before = res.std_gap_no_sa_um
         σ_after  = res.std_gap_um
         μ        = res.mean_gap_um
@@ -614,13 +615,14 @@ def plot_selective_assembly(
             ax.set_xlabel("Gap [μm]"); ax.set_ylabel("Count")
     plt.tight_layout()
     p = os.path.join(save_dir, "07a_sa_gap_distribution.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=C.BG)
-    plt.close(fig); print(f"  Saved → {p}")
+    savefig_paper(fig, p, dpi=150)
+    plt.close(fig)
 
     # ── Fig 07b: Cost breakdown ───────────────────────────────────────
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5), facecolor=C.BG)
     for ax in (ax1, ax2):
         ax.set_facecolor(C.BG)
+        patch_ax(ax)
     fig.suptitle("Fig 07b — Cost Breakdown", color=C.TEXT)
 
     cost_keys = ["material_usd", "machining_usd", "bearings_usd", "sa_usd"]
@@ -648,8 +650,8 @@ def plot_selective_assembly(
     ax2.grid(axis="y", alpha=0.3)
     plt.tight_layout()
     p = os.path.join(save_dir, "07b_cost_breakdown.png")
-    fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=C.BG)
-    plt.close(fig); print(f"  Saved → {p}")
+    savefig_paper(fig, p, dpi=150)
+    plt.close(fig)
 
     # ── Fig 07c: Improvement ratio and yield vs. n_bins ───────────────
     if analyser is not None:
@@ -664,6 +666,7 @@ def plot_selective_assembly(
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 5), facecolor=C.BG)
         for ax in (ax1, ax2):
             ax.set_facecolor(C.BG)
+            patch_ax(ax)
         fig.suptitle("Fig 07c — SA Performance vs. Number of Bins", color=C.TEXT)
 
         for j, res in enumerate(sa_results):
@@ -687,8 +690,8 @@ def plot_selective_assembly(
 
         plt.tight_layout()
         p = os.path.join(save_dir, "07c_sa_vs_bins.png")
-        fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=C.BG)
-        plt.close(fig); print(f"  Saved → {p}")
+        savefig_paper(fig, p, dpi=150)
+        plt.close(fig)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

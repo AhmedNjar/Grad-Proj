@@ -194,7 +194,7 @@ class BearingPerformanceCalculator:
         station_states: List[StationState] = []
         for k, (st, brg, speed_ok, warn) in enumerate(resolved):
             z_pos       = z_stations[k]
-            ndm_val     = brg.ndm(n)
+            ndm_val     = brg.ndm
             K_r, K_a    = self._pair_stiffness(st, brg)
             R_sta       = radial_rxns[k]
             load_per    = abs(R_sta) / st.n_bearings
