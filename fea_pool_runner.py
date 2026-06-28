@@ -70,6 +70,7 @@ class FEAPoolRunner:
         design_space: DesignSpace,
         dry_run: bool = True,
         output_dir: str | Path = "fea_batch_results",
+        start_id: int = 1,
     ):
         self.X_samples    = X_samples
         self.design_space = design_space
@@ -77,6 +78,9 @@ class FEAPoolRunner:
         self.output_dir   = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.results: List[Dict] = []
+        self.start_id   = start_id
+
+        self.output_dir = Path("F:/files/rdo_results/fea_cache")
 
         mode = "DRY-RUN (analytical v2)" if dry_run else "FULL ANSYS MAPDL"
         log.info(f"FEA Pool Runner  mode={mode}  n={len(X_samples)}")
@@ -96,11 +100,11 @@ class FEAPoolRunner:
 
         for i, x in enumerate(tqdm(self.X_samples, desc="FEA Pool")):
             try:
-                res = executor(x, case_id=i + 1)
+                res = executor(x, case_id=self.start_id + i)
                 self.results.append(res)
                 fails = 0
             except Exception as exc:
-                log.error(f"Case {i+1} failed: {exc}")
+                log.error(f"Case {self.start_id + i} failed: {exc}")
                 fails += 1
                 if fails >= max_failures:
                     log.error("Stopping — too many consecutive failures.")

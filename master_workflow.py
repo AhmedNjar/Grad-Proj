@@ -217,16 +217,34 @@ class RDOMasterOrchestrator:
     # Stage 2 — FEA Pool
     # ─────────────────────────────────────────────────────────────────────────
     def stage_fea(self, X: np.ndarray) -> pd.DataFrame:
-        log.info("\n── STAGE 2: FEA POOL ──────────────────────────────────────────")
+        log.info("\n── STAGE 2: FINITE ELEMENT ANALYSIS (ANSYS MAPDL) ──────────")
         M      = self.m
         dry    = self.config.get("dry_run", True)
+
+        # 1. تحديد من أين يبدأ ترقيم الـ case_id بناءً على الملف القديم لمنع مسح الصور
+        csv_path = self.out_dir / "fea_results.csv"
+        start_id = 1
+        if csv_path.exists():
+            try:
+                df_existing = pd.read_csv(csv_path)
+                if "case_id" in df_existing.columns and not df_existing.empty:
+                    start_id = int(df_existing["case_id"].max()) + 1
+                    log.info(f"   Found existing cases. New FEA folders will start from case_{start_id:04d}")
+            except Exception as e:
+                log.warning(f"   Could not read existing case_id offset: {e}")
+
+        # 2. تمرير الـ start_id للـ Runner
         runner = M["fea_pool_runner"].FEAPoolRunner(
-            X, self.ds, dry_run=dry,
-            output_dir=str(self.out_dir / "fea_cache"),
+            X, 
+            self.ds, 
+            dry_run=self.config["dry_run"], 
+            start_id=start_id  # <--- إضافة البارامتر الجديد هنا
         )
+        
+        log.info(f"   Submitting batch of {len(X)} cases to FEA pool...")
         t0 = time.time()
         df = runner.execute_batch(max_failures=10, save_interval=20)
-        # ... (نفس الكود بالأعلى)
+
         elapsed = time.time() - t0
 
         if df.empty:
