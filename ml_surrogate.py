@@ -153,14 +153,21 @@ class SurrogateModel:
 
             y_i = y_train[:, i].copy()
 
-            # FIX-A: log1p transform for FoS (heavy-tailed, always positive)
-            use_log = ("factor_of_safety" in out_name.lower() and
-                       np.all(y_i > 0))
+            # FIX-A (extended): log1p transform for heavy-tailed positive outputs
+            # - factor_of_safety: ratio, heavy-tailed (2 → 500+)
+            # - static_max_deflection_um: cubic in overhang (δ ∝ a³/EI),
+            #   causing severe skew that linear scalers cannot handle.
+            #   Root cause of R²=-2.24 on held-out test set.
+            use_log = (
+                ("factor_of_safety" in out_name.lower() or
+                 "deflection" in out_name.lower())
+                and np.all(y_i > 0)
+            )
             if use_log:
                 y_i = np.log1p(y_i)
                 self._log_outputs.add(out_name)
                 if verbose:
-                    log.info(f"     [log1p transform applied — FIX-A]")
+                    log.info(f"     [log1p transform applied — FIX-A: {out_name}]")
 
             y_i_2d = y_i.reshape(-1, 1)
 

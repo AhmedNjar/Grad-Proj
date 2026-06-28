@@ -467,7 +467,7 @@ class RobustOptimizer:
             "static_max_deflection_um" : (20.0,   +1),  # δ < 20 μm
             "static_max_vonmises_MPa"  : (300.0,  +1),  # σ < 300 MPa
             "static_factor_of_safety"  : (2.0,    -1),  # FoS > 2.0
-            "freq_mode1_Hz"            : (self.n_rpm / 60.0 / 0.75, -1),  # f1 > n/0.75
+            "freq_mode1_Hz"            : (self.n_rpm / 60.0 / 0.75, -1),  # f1 > n[Hz]/0.75 ✅ correct
         }
 
         eps = 1e-12
@@ -550,6 +550,18 @@ class RobustOptimizer:
         nearest    = int(np.argmin(np.abs(_ACBB_BORES - bore_raw)))
         f3        += BORE_SNAP_PENALTY_USD_PER_MM * abs(bore_raw - _ACBB_BORES[nearest])
 
+        # ── Bearing minimum load constraint (ISO 281 §4.3.3) ───────────
+        # P_min ≈ 0.02 × C_r for ACBB to prevent skidding/smearing
+        # If cutting force < P_min → bearing is over-designed for this load
+        C_r_min, _ = self._bearing_cached(var_dict)
+        P_min_iso  = 0.02 * C_r_min           # N
+        Ft_v = float(var_dict.get("Ft", 1000.0))
+        Fr_v = float(var_dict.get("Fr", 1000.0))
+        F_act = np.sqrt(Ft_v**2 + Fr_v**2)
+        if F_act < P_min_iso:
+            # Penalty: $2000 per kN below minimum load (steers to smaller bore)
+            f3 += 2000.0 * (P_min_iso - F_act) / 1000.0
+
         # ── f4: Mass ──────────────────────────────────────────────────────
         ri     = var_dict["ri"]
         volume = sum(np.pi * (var_dict[f"R{i}"]**2 - ri**2) * var_dict[f"L{i}"]
@@ -571,7 +583,11 @@ class RobustOptimizer:
         else:
             freq1_mean = sn[next(iter(sn))]["mean"]   # fallback: first output
         freq1_mean = max(abs(freq1_mean), 1.0)         # guard div/0
-        f6         = self.n_rpm / freq1_mean           # minimise → push f₁ >> n
+        # CRITICAL FIX: n_rpm [rpm] / freq [Hz] is NOT dimensionless.
+        # Correct speed ratio = (n_rpm/60) / f1_Hz — both in [Hz]
+        # Old code gave f6≈8.5 instead of ≈0.14 for a typical spindle.
+        # Threshold of 0.75 now physically correct: run < 75% of f1.
+        f6 = (self.n_rpm / 60.0) / max(freq1_mean, 1.0)  # dimensionless ∈ (0,1) for safe designs
 
         # ── f7: System Reliability Index β (FOSM) ─────────────────────────
         # −β_system  (minimise → maximise reliability)
@@ -677,7 +693,7 @@ class RobustOptimizer:
         log.info(f"✅ DE done  nfev≈{maxiter*len(weight_sets)*15}  "
                  f"cost=${F_p[best,2]:.0f}  weight={F_p[best,3]:.2f}kg  "
                  f"L10={-F_p[best,4]*self.L10_target:,.0f}h  "
-                 f"speed_ratio={F_p[best,5]:.3f}  β_sys={beta_sys:.3f}  "
+                 f"speed_ratio={F_p[best,5]:.4f}  {'SAFE ✅' if F_p[best,5]<0.75 else 'WARN ⚠️ >0.75'}  β_sys={beta_sys:.3f}  "
                  f"chatter_ratio={chatter:.3f}  TOPSIS_C={topsis_res.scores[best]:.4f}")
 
         return OptimizationResult(
