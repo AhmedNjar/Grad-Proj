@@ -148,13 +148,13 @@ class RDOMasterOrchestrator:
     # Stage 1 — LHS Sampling
     # ─────────────────────────────────────────────────────────────────────────
     def stage_lhs(self) -> np.ndarray:
-        log.info("\n── STAGE 1: SMART LHS SAMPLING (WITH DEDUPLICATION) ───────────")
+        log.info("\n── STAGE 1: ADAPTIVE MAXIMIN INFILL SAMPLING ───────────")
         M       = self.m
         sampler = M["lhs_sampler"].LHSSampler(self.ds)
-        n_target = self.config["n_samples"]
+        total_requested = self.config["n_samples"]
         csv_path = self.out_dir / "fea_results.csv"
 
-        # 1. قراءة الملف القديم إن وجد لمعرفة الأجزاء التي تم حسابها مسبقاً
+        # 1. قراءة البيانات القديمة من الـ CSV
         existing_vars = []
         var_cols = []
         if csv_path.exists():
@@ -163,56 +163,77 @@ class RDOMasterOrchestrator:
                 var_cols = [c for c in df_existing.columns if c.startswith("var_")]
                 if var_cols:
                     existing_vars = df_existing[var_cols].values
-                    log.info(f"   Found {len(existing_vars)} existing records in CSV. Skipping duplicates...")
+                    log.info(f"   Found {len(existing_vars)} existing records in CSV.")
             except Exception as e:
                 log.warning(f"   Could not read existing CSV: {e}")
 
-        # 2. توليد عينات وتخطي المكرر حتى نصل للعدد المطلوب من الأجزاء الجديدة
-        new_samples = []
-        batch_size = n_target * 5  # توليد عينات بزيادة للفلترة
-        seed_offset = 42
+        n_existing = len(existing_vars) if len(existing_vars) > 0 else 0
+        n_target = total_requested - n_existing
 
-        while len(new_samples) < n_target:
-            X_pool = sampler.generate_lhs(batch_size, criterion="maximin", seed=seed_offset)
-            seed_offset += 1
+        if n_target <= 0:
+            log.info(f"✅ Target of {total_requested} already met. No new samples needed.")
+            return np.array([])
 
-            for x in X_pool:
-                if len(new_samples) >= n_target:
-                    break
+        log.info(f"🎯 Target: {total_requested} total. Existing: {n_existing}. Filling gaps with {n_target} optimal samples...")
+
+        # إذا كانت الداتابيز فاضية تماماً، نولد LHS عادي لأول مرة
+        if n_existing == 0:
+            X = sampler.generate_lhs(n_target, criterion="maximin", seed=42)
+            path = self.out_dir / "lhs_samples.csv"
+            sampler.save_samples(X, str(path), fmt="csv")
+            return X
+
+        # 2. خوارزمية ملء الفراغات الذكية (Space-Filling Infill)
+        # حساب الـ Range (المدى) لكل متغير لتفادي مشكلة اختلاف الوحدات (مثل RPM بآلاف والمليمتر بعشرات)
+        col_ranges = np.ptp(existing_vars, axis=0)
+        col_ranges[col_ranges == 0] = 1.0  # حماية من القسمة على صفر
+
+        # توليد خزان كبير من العينات المرشحة (Pool)
+        pool_size = max(n_target * 30, 1500)
+        X_pool_norm = sampler.generate_lhs(pool_size, criterion="maximin", seed=42)
+        
+        # تحويل الخزان إلى القيم الفيزيائية الحقيقية لترجمتها ومقارنتها
+        pool_physical = []
+        for x in X_pool_norm:
+            v = self.ds.decode_vector(x)
+            pool_physical.append([v[c.replace("var_", "")] for c in var_cols])
+        pool_physical = np.array(pool_physical)
+
+        # الاختيار الذكي بالتكرار (Greedy Selection)
+        selected_indices = []
+        current_dataset = existing_vars.copy()
+
+        for _ in range(n_target):
+            min_distances = []
+            for candidate in pool_physical:
+                # حساب المسافات النسبية (المنظمة بناءً على مدى كل متغير)
+                diffs = (current_dataset - candidate) / col_ranges
+                dists = np.linalg.norm(diffs, axis=1)
+                min_distances.append(np.min(dists)) # أقرب مسافة للنقطة دي مع الداتابيز
+            
+            min_distances = np.array(min_distances)
+            
+            # استبعاد العينات التي تم اختيارها في اللفات السابقة بجعل مسافتها سالب
+            if selected_indices:
+                min_distances[selected_indices] = -1.0
                 
-                # فك تشفير الأبعاد لمقارنتها بالقيم الحقيقية
-                v = self.ds.decode_vector(x)
-                if not var_cols: 
-                    var_cols = [f"var_{k}" for k in v.keys()]
-                    
-                v_array = np.array([v[c.replace("var_", "")] for c in var_cols])
+            # نختار النقطة المرشحة التي تملك "أكبر أقل مسافة" (يعني أبعد نقطة عن أي حالة تم حسابها سابقاً)
+            best_idx = np.argmax(min_distances)
+            selected_indices.append(best_idx)
+            
+            # إضافتها مؤقتاً لقاعدة البيانات الحالية عشان النقطة اللي عليها الدور في اللفة الجاية متقربش منها
+            current_dataset = np.vstack([current_dataset, pool_physical[best_idx]])
 
-                # التحقق: هل هذه الأبعاد موجودة مسبقاً؟
-                is_duplicate = False
-                if len(existing_vars) > 0:
-                    # حساب الفرق بين الأبعاد الحالية وكل الأبعاد السابقة (تسامح 1e-4 للأرقام العشرية)
-                    distances = np.linalg.norm(existing_vars - v_array, axis=1)
-                    if np.any(distances < 1e-4):  
-                        is_duplicate = True
-
-                if not is_duplicate:
-                    new_samples.append(x)
-                    # إضافة الجزء الجديد للقائمة المؤقتة لمنع تكراره في نفس الـ Loop
-                    if len(existing_vars) > 0:
-                        existing_vars = np.vstack([existing_vars, v_array])
-                    else:
-                        existing_vars = np.array([v_array])
-
-        X = np.array(new_samples)
+        # 3. حفظ الـ 50 عينة المثالية المتبقية وإرسالها لطابور ANSYS
+        X_new_norm = X_pool_norm[selected_indices]
         path = self.out_dir / "lhs_samples.csv"
-        sampler.save_samples(X, str(path), fmt="csv")
-        log.info(f"✅ {n_target} NEW LHS samples generated & saved → {path}")
+        sampler.save_samples(X_new_norm, str(path), fmt="csv")
+        log.info(f"✅ {n_target} space-filling samples successfully selected & saved → {path}")
 
         if not self.config["no_plots"]:
-            log.info("   Generating LHS plots...")
-            M["lhs_sampler"].plot_lhs_samples(X, self.ds, save_dir=str(self.plot_dir))
+            M["lhs_sampler"].plot_lhs_samples(X_new_norm, self.ds, save_dir=str(self.plot_dir))
 
-        return X
+        return X_new_norm
     # ─────────────────────────────────────────────────────────────────────────
     # Stage 2 — FEA Pool
     # ─────────────────────────────────────────────────────────────────────────
