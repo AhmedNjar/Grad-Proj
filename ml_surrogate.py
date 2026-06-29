@@ -213,6 +213,7 @@ class SurrogateModel:
                     log.info(f"     CV R² = {cv.mean():.4f} ± {cv.std():.4f}")
 
         log.info("✅ Training complete!")
+        self.cv_scores_ = cv_scores   # store for downstream quality checks
         return cv_scores
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -425,6 +426,7 @@ class SurrogateModel:
             "output_names": self.output_names,
             "_pca":         getattr(self, "_pca",         None),
             "_log_outputs": getattr(self, "_log_outputs", set()),
+            "cv_scores_":   getattr(self, "cv_scores_",   {}),
         }, filepath)
         log.info(f"💾 Saved → {filepath}")
 
@@ -438,6 +440,7 @@ class SurrogateModel:
         obj.output_names  = d["output_names"]
         obj._pca          = d.get("_pca",         None)
         obj._log_outputs  = d.get("_log_outputs",  set())
+        obj.cv_scores_    = d.get("cv_scores_",    {})
         log.info(f"📂 Loaded ← {filepath}")
         return obj
 

@@ -139,6 +139,11 @@ class RunoutBreakdown:
     housing_it_value_um:  float   # IT value for housing bore
 
     @property
+    # NOTE: RSS combination assumes all sources are statistically independent.
+    # Housing eccentricity is systematic (directional), so RSS is conservative.
+    # Worst-case linear sum = TIR_linear_um; RSS = TIR_rss_um.
+    # RSS combination assumes statistically independent sources (conservative upper bound).
+    # Housing eccentricity is systematic; worst-case linear = TIR_loaded_um.
     def TIR_geometric_um(self) -> float:
         return math.sqrt(
             self.TIR_bearing_um**2 + self.TIR_straightness_um**2
@@ -314,8 +319,19 @@ class ShaftRunoutAnalyser:
         n_rpm                 : Operating speed [RPM]  (used for thermal model)
         delta_T_override      : If set, override thermal model [°C]
         """
+        # ── Bearing positions: prefer var_dict fractions (design variable) ──
+        # FIX: Previously used fixed arrangement z_fractions, which ignored the
+        # optimized front_z_fraction / rear_z_fraction design variables.
+        # This caused TIR to be insensitive to bearing position optimization.
         L_oh   = z_front_bearing_mm
         L_span = max(z_rear_bearing_mm - z_front_bearing_mm, 1.0)
+        # Override with design vector if fractions present (consistent with optimizer)
+        if "L1" in var_dict and "front_z_fraction" in var_dict and "L2" in var_dict:
+            _L_oh_dv = var_dict["L1"] + var_dict["front_z_fraction"] * var_dict["L2"]
+            _L_r_dv  = var_dict["L1"] + var_dict["rear_z_fraction"]  * var_dict["L2"]
+            if _L_oh_dv > 0 and _L_r_dv > _L_oh_dv:
+                L_oh   = _L_oh_dv
+                L_span = _L_r_dv - _L_oh_dv
         L_total = (var_dict["L1"] + var_dict["L2"]
                    + var_dict["L3"] + var_dict["L4"])
         amp = 1.0 + L_oh / L_span

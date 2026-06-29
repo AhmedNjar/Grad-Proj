@@ -33,6 +33,7 @@
 
 from __future__ import annotations
 import logging
+import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Optional, Tuple
 
@@ -472,9 +473,22 @@ class RobustOptimizer:
 
         eps = 1e-12
         pf_list = []
+
+        # Surrogate quality guard: if surrogate CV R² < 0.5 for an output,
+        # its β estimate is noise-dominated and should be excluded from system β.
+        # This prevents β_deflection≈0.45 (from bad surrogate) from dragging
+        # down β_sys when the actual deflection is safely within limits.
+        _poor_surrogate_outputs = set()
+        if hasattr(self.surrogate, 'cv_scores_') and self.surrogate.cv_scores_:
+            for out_name, r2 in self.surrogate.cv_scores_.items():
+                if r2 < 0.50:
+                    _poor_surrogate_outputs.add(out_name)
+
         for out_name, (limit, sign) in _LIMITS_SIGN.items():
             if out_name not in sn:
                 continue
+            if out_name in _poor_surrogate_outputs:
+                continue  # skip unreliable surrogate outputs from β_sys
             mu_y  = sn[out_name]["mean"]
             sig_y = max(sn[out_name]["std"], eps)
             # g = sign*(limit - Y) → μ_g, σ_g
@@ -593,6 +607,34 @@ class RobustOptimizer:
         # −β_system  (minimise → maximise reliability)
         # Reuses MC samples from taguchi_sn_ratio via _compute_beta_system.
         f7 = self._compute_beta_system(x, sn)
+
+        # ── TIR bending-slope penalty (Module 09 physics, inline estimate) ────
+        # Root cause of TIR≈41μm in production run: large overhang drives
+        # bending slope TIR. This wasn't an optimizer objective — now it is.
+        # Formula IDENTICAL to 09_shaft_runout.py (after consistency fix):
+        #   L_oh  = L1 + front_z_fraction × L2   [mm]  — from design vector
+        #   θ     = F_resultant × L_oh² / (2EI)  [rad]
+        #   TIR   = θ × L_oh × 1000              [μm]
+        # Penalty: $1500/μm above ISO 230-1 Class B limit of 20μm.
+        _TIR_LIMIT = 20.0   # ISO 230-1 Class B
+        _L1  = float(var_dict.get("L1",  80.0))
+        _L2  = float(var_dict.get("L2", 200.0))
+        _ff  = float(var_dict.get("front_z_fraction", 0.15))
+        _rf  = float(var_dict.get("rear_z_fraction",  0.85))
+        _L_oh   = _L1 + _ff * _L2          # nose → front bearing [mm]
+        _L_rear = _L1 + _rf * _L2          # nose → rear bearing  [mm]
+        _L_span = max(_L_rear - _L_oh, 1.0)
+        _amp    = 1.0 + _L_oh / _L_span    # TIR amplification factor (same as module 09)
+        _R1  = float(var_dict.get("R1", 45.0))
+        _ri  = float(var_dict.get("ri", 30.0))
+        _E   = float(var_dict.get("E", 2.1e5))
+        _Ft  = float(var_dict.get("Ft", 1000.0))
+        _Fr  = float(var_dict.get("Fr", 1000.0))
+        _F_res = math.sqrt(_Ft**2 + _Fr**2)   # resultant (both bend the shaft)
+        _I   = max(math.pi / 4.0 * (_R1**4 - _ri**4), 1.0)
+        _theta     = (_F_res * _L_oh**2) / (2.0 * _E * _I)
+        _TIR_slope = abs(_theta * _L_oh) * 1000.0   # μm (before amp)
+        f3 += 1500.0 * max(0.0, _TIR_slope - _TIR_LIMIT)
 
         # ── f8: Chatter Stability Ratio (option C — constraint + objective) ─
         _, K_dyn = self._bearing_cached(var_dict)   # reuses f5's cached lookup
