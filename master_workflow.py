@@ -254,11 +254,23 @@ class RDOMasterOrchestrator:
             except Exception as e:
                 log.warning(f"   Could not read existing case_id offset: {e}")
 
+        if len(X) == 0:
+            if csv_path.exists():
+                log.info("   No new FEA cases to run — using existing FEA results from disk.")
+                df = pd.read_csv(csv_path)
+                if df.empty:
+                    log.error("❌ Existing FEA CSV is empty. Cannot continue without any FEA data.")
+                    raise RuntimeError("No FEA data available for surrogate training.")
+                return df
+            else:
+                log.error("❌ No new FEA cases to run and no existing FEA results file found.")
+                raise RuntimeError("FEA pipeline has no data to work with.")
+
         # 2. تمرير الـ start_id للـ Runner
         runner = M["fea_pool_runner"].FEAPoolRunner(
-            X, 
-            self.ds, 
-            dry_run=self.config["dry_run"], 
+            X,
+            self.ds,
+            dry_run=self.config["dry_run"],
             start_id=start_id  # <--- إضافة البارامتر الجديد هنا
         )
         
@@ -556,14 +568,21 @@ class RDOMasterOrchestrator:
         import numpy as np
         import os
 
-        NAVY="#0d1b2a"; TEAL="#00b4d8"; CORAL="#e63946"
-        GOLD="#ffd166"; MINT="#06d6a0"; GRAY="#8d99ae"
+        NAVY="#1a1a2e"; TEAL="#1f6eb5"; CORAL="#d62728"
+        GOLD="#e08c1a"; MINT="#2a7d4f"; GRAY="#7f7f7f"
+        BG = "#ffffff"
+        AX_BG = "#f7f7f7"
         plt.rcParams.update({
-            "figure.facecolor": NAVY, "axes.facecolor": "#112233",
-            "axes.edgecolor": GRAY, "axes.labelcolor": "white",
-            "xtick.color": GRAY, "ytick.color": GRAY,
-            "text.color": "white", "grid.color": "#2d4060",
-            "grid.alpha": 0.4, "font.size": 9,
+            "figure.facecolor": BG,
+            "axes.facecolor": AX_BG,
+            "axes.edgecolor": NAVY,
+            "axes.labelcolor": NAVY,
+            "xtick.color": NAVY,
+            "ytick.color": NAVY,
+            "text.color": NAVY,
+            "grid.color": "#dddddd",
+            "grid.alpha": 0.7,
+            "font.size": 9,
         })
 
         from matplotlib.gridspec import GridSpec
@@ -578,11 +597,11 @@ class RDOMasterOrchestrator:
         means      = np.array([r.mean_gap_um       for r in sa_results])
         reduc_pct  = (1 - std_after / std_before) * 100
 
-        fig = plt.figure(figsize=(16, 14), facecolor=NAVY)
+        fig = plt.figure(figsize=(16, 14), facecolor=BG)
         fig.suptitle(
-            "جدول مقارنة: الانحراف المعياري وتشتت التجاوزات عند واجهات المغزل الحرجة\n"
-            "قبل وبعد تطبيق استراتيجية التجميع الانتقائي — 5 فئات",
-            color="white", fontsize=13, fontweight="bold", y=0.98,
+            "Comparative SA Summary: standard deviation and variation across critical spindle interfaces\n"
+            "Before / After selective assembly (5 bins)",
+            color=NAVY, fontsize=13, fontweight="bold", y=0.98,
         )
         gs = GridSpec(3, 2, figure=fig, hspace=0.55, wspace=0.38,
                       top=0.91, bottom=0.06, left=0.07, right=0.97)
@@ -590,82 +609,82 @@ class RDOMasterOrchestrator:
         x  = np.arange(n); w = 0.32
 
         # ── σ bar chart ───────────────────────────────────────────────────
-        ax0 = fig.add_subplot(gs[0, 0]); ax0.set_facecolor("#112233")
+        ax0 = fig.add_subplot(gs[0, 0]); ax0.set_facecolor(AX_BG)
         b1 = ax0.bar(x - w/2, std_before, w, color=CORAL, edgecolor=NAVY, linewidth=0.5,
-                     label="قبل SA (Before)")
+                     label="Before SA")
         b2 = ax0.bar(x + w/2, std_after,  w, color=TEAL,  edgecolor=NAVY, linewidth=0.5,
-                     label="بعد SA (After 5 bins)")
+                     label="After SA (5 bins)")
         for bar, val in zip(list(b1)+list(b2), list(std_before)+list(std_after)):
             ax0.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.08,
-                     f"{val:.2f}", ha="center", va="bottom", fontsize=8, color="white")
+                     f"{val:.2f}", ha="center", va="bottom", fontsize=8, color=NAVY)
         ax0.set_xticks(x); ax0.set_xticklabels([f"I{i+1}" for i in range(n)])
         ax0.set_ylabel("σ [μm]")
-        ax0.set_title("الانحراف المعياري σ — قبل / بعد", fontsize=10, pad=6)
+        ax0.set_title("Standard deviation σ — before / after", fontsize=10, pad=6)
         ax0.legend(fontsize=8); ax0.grid(axis="y", alpha=0.35)
 
         # ── 6σ spread bar chart ───────────────────────────────────────────
-        ax1 = fig.add_subplot(gs[0, 1]); ax1.set_facecolor("#112233")
+        ax1 = fig.add_subplot(gs[0, 1]); ax1.set_facecolor(AX_BG)
         b3 = ax1.bar(x - w/2, spread_b, w, color=CORAL, edgecolor=NAVY, linewidth=0.5)
         b4 = ax1.bar(x + w/2, spread_a, w, color=TEAL,  edgecolor=NAVY, linewidth=0.5)
         for bar, val in zip(list(b3)+list(b4), list(spread_b)+list(spread_a)):
             ax1.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.2,
-                     f"{val:.1f}", ha="center", va="bottom", fontsize=8, color="white")
+                     f"{val:.1f}", ha="center", va="bottom", fontsize=8, color=NAVY)
         ax1.set_xticks(x); ax1.set_xticklabels([f"I{i+1}" for i in range(n)])
         ax1.set_ylabel("6σ Spread [μm]")
-        ax1.set_title("تشتت التجاوزات (6σ) — قبل / بعد", fontsize=10, pad=6)
-        ax1.legend(handles=[mpatches.Patch(color=CORAL, label="قبل SA"),
-                             mpatches.Patch(color=TEAL,  label="بعد SA (5 bins)")],
+        ax1.set_title("6σ spread — before / after", fontsize=10, pad=6)
+        ax1.legend(handles=[mpatches.Patch(color=CORAL, label="Before SA"),
+                             mpatches.Patch(color=TEAL,  label="After SA (5 bins)")],
                    fontsize=8)
         ax1.grid(axis="y", alpha=0.35)
 
         # ── improvement horizontal bar ────────────────────────────────────
-        ax2 = fig.add_subplot(gs[1, 0]); ax2.set_facecolor("#112233")
+        ax2 = fig.add_subplot(gs[1, 0]); ax2.set_facecolor(AX_BG)
         colours_imp = [MINT if v >= 3 else GOLD for v in improve]
         bars = ax2.barh(np.arange(n), improve, color=colours_imp,
                         edgecolor=NAVY, linewidth=0.5, height=0.45)
         for bar, val in zip(bars, improve):
             ax2.text(bar.get_width()+0.05, bar.get_y()+bar.get_height()/2,
-                     f"×{val:.2f}", va="center", fontsize=9, color="white",
+                     f"×{val:.2f}", va="center", fontsize=9, color=NAVY,
                      fontweight="bold")
         ax2.axvline(1.0, color=GRAY, lw=0.9, linestyle="--", alpha=0.6)
         ax2.set_yticks(np.arange(n))
         ax2.set_yticklabels([f"I{i+1}" for i in range(n)])
-        ax2.set_xlabel("نسبة التحسين ×")
-        ax2.set_title("نسبة تحسين التشتت (σ_before / σ_after)", fontsize=10, pad=6)
+        ax2.set_xlabel("Improvement factor ×")
+        ax2.set_title("Scatter improvement (σ_before / σ_after)", fontsize=10, pad=6)
         ax2.grid(axis="x", alpha=0.35)
 
         # ── yield + reduction dual axis ───────────────────────────────────
-        ax3 = fig.add_subplot(gs[1, 1]); ax3.set_facecolor("#112233")
-        ax3b = ax3.twinx(); ax3b.set_facecolor("#112233")
+        ax3 = fig.add_subplot(gs[1, 1]); ax3.set_facecolor(AX_BG)
+        ax3b = ax3.twinx(); ax3b.set_facecolor(AX_BG)
         b5 = ax3.bar(x - w/2,  yields,    w, color=GOLD, edgecolor=NAVY, linewidth=0.5,
                      label="Yield %")
         b6 = ax3b.bar(x + w/2, reduc_pct, w, color=MINT, edgecolor=NAVY, linewidth=0.5,
-                      label="تخفيض σ %")
+                      label="σ reduction %")
         for bar, val in zip(b5, yields):
             ax3.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.2,
-                     f"{val:.1f}%", ha="center", va="bottom", fontsize=8, color="white")
+                     f"{val:.1f}%", ha="center", va="bottom", fontsize=8, color=NAVY)
         for bar, val in zip(b6, reduc_pct):
             ax3b.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.5,
                       f"{val:.0f}%", ha="center", va="bottom", fontsize=8, color=MINT)
         ax3.set_xticks(x); ax3.set_xticklabels([f"I{i+1}" for i in range(n)])
-        ax3.set_ylabel("Yield [%]", color=GOLD); ax3b.set_ylabel("تخفيض σ [%]", color=MINT)
-        ax3.tick_params(axis="y", colors=GOLD); ax3b.tick_params(axis="y", colors=MINT)
+        ax3.set_ylabel("Yield [%]", color=NAVY); ax3b.set_ylabel("σ reduction [%]", color=MINT)
+        ax3.tick_params(axis="y", colors=NAVY); ax3b.tick_params(axis="y", colors=MINT)
         ax3.set_ylim(85, 102); ax3b.set_ylim(0, 100)
-        ax3.set_title("نسبة التطابق + نسبة تخفيض σ", fontsize=10, pad=6)
+        ax3.set_title("Yield and σ reduction", fontsize=10, pad=6)
         ax3.legend(handles=[mpatches.Patch(color=GOLD, label="Yield %"),
                              mpatches.Patch(color=MINT, label="σ reduction %")],
                    fontsize=8)
 
         # ── summary table ─────────────────────────────────────────────────
         ax4 = fig.add_subplot(gs[2, :]); ax4.axis("off")
-        cols = ["الواجهة (Interface)", "μ_gap [μm]",
-                "σ قبل SA [μm]", "σ بعد SA [μm]",
-                "6σ قبل [μm]", "6σ بعد [μm]",
-                "تخفيض σ [%]", "تحسين ×", "تطابق %", "تصنيف"]
+        cols = ["Interface", "Mean gap [μm]",
+                "σ before SA [μm]", "σ after SA [μm]",
+                "6σ before [μm]", "6σ after [μm]",
+                "σ reduction [%]", "Improvement ×", "Match yield [%]", "Grade"]
         rows = []
         for i, r in enumerate(sa_results):
-            grade = ("ممتاز ✅" if improve[i] >= 4 else
-                     "جيد جداً ✅" if improve[i] >= 2.5 else "مقبول ⚠️")
+            grade = ("Excellent ✅" if improve[i] >= 4 else
+                     "Very good ✅" if improve[i] >= 2.5 else "Acceptable ⚠️")
             rows.append([en_names[i], f"{means[i]:.2f}",
                           f"{std_before[i]:.3f}", f"{std_after[i]:.3f}",
                           f"{spread_b[i]:.2f}", f"{spread_a[i]:.2f}",
@@ -674,31 +693,31 @@ class RDOMasterOrchestrator:
         tbl = ax4.table(cellText=rows, colLabels=cols,
                         cellLoc="center", loc="center", bbox=[0, 0, 1, 1])
         tbl.auto_set_font_size(False); tbl.set_fontsize(8.5)
-        row_colours = ["#1a2c3d", "#162436"]
+        row_colours = ["#ffffff", "#f0f4f8"]
         for j in range(len(cols)):
             cell = tbl[0, j]
-            cell.set_facecolor(TEAL)
+            cell.set_facecolor(NAVY)
             cell.set_text_props(color="white", fontweight="bold")
-            cell.set_edgecolor(NAVY)
+            cell.set_edgecolor("#cccccc")
         for i, row in enumerate(rows):
             for j in range(len(cols)):
                 cell = tbl[i+1, j]
                 cell.set_facecolor(row_colours[i % 2])
-                cell.set_edgecolor(NAVY)
-                cell.set_text_props(color="white")
+                cell.set_edgecolor("#cccccc")
+                cell.set_text_props(color=NAVY)
                 if j == 7:   # improvement column
                     cell.set_facecolor(MINT if improve[i] >= 4 else
                                        GOLD if improve[i] >= 2.5 else CORAL)
                     cell.set_text_props(color=NAVY, fontweight="bold")
                 if j == 6:
                     cell.set_text_props(color=MINT, fontweight="bold")
-        ax4.set_title("جدول ملخص المقارنة الكاملة — الواجهات الحرجة",
-                      color="white", fontsize=10, pad=8)
+        ax4.set_title("SA comparison summary table — critical spindle interfaces",
+                      color=NAVY, fontsize=10, pad=8)
         imap = " | ".join([f"I{i+1}={nm}" for i, nm in enumerate(en_names)])
         fig.text(0.5, 0.025, imap, ha="center", color=GRAY, fontsize=8)
 
         p = str(self.plot_dir / "07_sa_comparison_table.png")
-        fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=NAVY)
+        fig.savefig(p, dpi=150, bbox_inches="tight", facecolor=BG)
         plt.close(fig)
         log.info(f"   Saved → {p}")
 
@@ -826,7 +845,7 @@ class RDOMasterOrchestrator:
     # ─────────────────────────────────────────────────────────────────────────
     # Stage 9 — Inverse Design
     # ─────────────────────────────────────────────────────────────────────────
-    def stage_inverse_design(self, df: pd.DataFrame) -> object:
+    def stage_inverse_design(self, df: pd.DataFrame, forward_surr: object | None = None) -> object:
         log.info("\n── STAGE 9: INVERSE DESIGN ─────────────────────────────────────")
         M = self.m
         out_cols = [c for c in [
@@ -858,7 +877,9 @@ class RDOMasterOrchestrator:
 
             if not self.config["no_plots"]:
                 M["inverse_design"].plot_inverse_design(
-                    eng, target_filtered, save_dir=str(self.plot_dir))
+                    eng, target_filtered,
+                    forward_surr=forward_surr,
+                    save_dir=str(self.plot_dir))
 
         return eng
 
@@ -1077,7 +1098,7 @@ class RDOMasterOrchestrator:
         self.stage_reliability(x_opt, surr, delta_nose_um, n_rpm)
 
         # 10b. Inverse design
-        self.stage_inverse_design(df)
+        self.stage_inverse_design(df, forward_surr=surr)
 
         # 11. Tolerance Optimization (Option C — Module 12)
         self.stage_tolerance_optimization(
@@ -1109,7 +1130,7 @@ class RDOMasterOrchestrator:
             return
         df   = pd.read_csv(fea_csv)
         surr = self.stage_surrogate(df)
-        self.stage_inverse_design(df)
+        self.stage_inverse_design(df, forward_surr=surr)
         self.stage_optimize(surr)
 
     # ─────────────────────────────────────────────────────────────────────────
