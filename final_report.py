@@ -21,7 +21,9 @@
           The thick wall (13.5 mm) and short overhang (153 mm) produce very
           low bending stress under the operating loads.  Stress is NOT the
           limiting factor — deflection is.
-        • FoS = 121 is realistic: this spindle is over-engineered for stress
+        • Static SF = σ_y/σ_bending (NOT DIN 743 fatigue SF)
+        • High SF values (~40-100) are expected for bending-dominated spindles
+          since deflection and TIR constraints are the active limits, not stress
           but the optimizer targeted deflection minimization, which naturally
           leads to thick-walled, stiff sections.
         • Limiting KPI: δ_nose = 20.9 μm > 15 μm target → FAILS.
@@ -345,8 +347,15 @@ class FinalReportBuilder:
         F_max_stress = v["sigma_y"] / self.FoS_min * I_segs[0] / (R1 * max(a, 1))
         F_max_N      = min(F_max_defl, F_max_stress)
         # Min bearing load: ISO 281 minimum load = 1% of C_r
-        F_min_N      = 0.01 * float(bf.C_r)
-        F_nom_N      = math.sqrt(v["Ft"]**2 + v["Fr"]**2)
+        F_min_N  = 0.01 * float(bf.C_r)              # ISO 281 min load
+        F_nom_N  = math.sqrt(v["Ft"]**2 + v["Fr"]**2)  # cutting force
+        # P_front: actual front bearing load (cantilever amplification)
+        # P = F × b/L_span where b = nose→rear bearing
+        _L_oh_r  = v["L1"] + v["front_z_fraction"] * v["L2"]
+        _L_rer_r = v["L1"] + v["rear_z_fraction"]  * v["L2"]
+        _Lspan_r = max(_L_rer_r - _L_oh_r, 1.0)
+        _b_r     = _L_oh_r + _Lspan_r
+        P_front_N = F_nom_N * _b_r / _Lspan_r   # bearing load > cutting force
 
         # ── Bore strategy ─────────────────────────────────────────────────
         bore_analysis = analyse_bore_strategy(v["R2"], n_rpm)
@@ -458,7 +467,10 @@ class FinalReportBuilder:
         limit_str = ("deflection" if F_max_defl < F_max_stress else "stress")
         print(f"  Headroom to F_max                  : {headroom:>7.1f}%")
         print(f"  Active limit: {limit_str}")
-        nom_tag = "✅" if F_min_N < F_nom_N < F_max_N else "❌ OUT OF ENVELOPE"
+        # BUG FIX: compare P_front (bearing load) not F_nom (cutting force)
+        # Cantilever effect: P_front = F_nom × b/L_span > F_nom
+        nom_tag = "✅" if F_min_N < P_front_N < F_max_N else "❌ OUT OF ENVELOPE"
+        print(f"  F_cutting = {F_nom_N:.1f} N  →  P_front = {P_front_N:.1f} N  (cantilever ×{P_front_N/max(F_nom_N,1):.2f})")
         print(f"  F_nom in safe envelope: {nom_tag}")
 
         # 4. Bearing life
@@ -531,7 +543,7 @@ class FinalReportBuilder:
             ("Runout TIR (RSS)",   runout_bd.TIR_rss_um,          self.tir_limit_um,                  "μm",  True,  True),
             ("Imbalance U",        ecc_result.U_static_gmm,       ecc_result.U_allow_gmm,"g·mm",True,  True),
             ("Bore snap error",    bore_snap_err,                  2.0,                   "%",   True,  False),
-            ("F_nom in envelope",  1.0 if F_min_N<F_nom_N<F_max_N else 0.0, 1.0,        "—",   False, True),
+            ("F_nom in envelope",  1.0 if F_min_N<P_front_N<F_max_N else 0.0, 1.0,        "—",   False, True),
         ]
         all_pass = True
         for name, actual, limit, unit, smaller_is_better, required in kpis:
@@ -592,8 +604,12 @@ class FinalReportBuilder:
         F_max_defl   = (self.delta_max_um*1e-3*3*EI_eff)/max(a**3,1)
         F_max_stress = v["sigma_y"]/self.FoS_min*I_segs[0]/(R1*max(a,1))
         F_max_N      = min(F_max_defl, F_max_stress)
-        F_min_N      = 0.01 * float(bf.C_r)
-        F_nom_N      = math.sqrt(v["Ft"]**2+v["Fr"]**2)
+        F_min_N  = 0.01 * float(bf.C_r)
+        F_nom_N  = math.sqrt(v["Ft"]**2+v["Fr"]**2)
+        _L_oh_r2  = v["L1"] + v["front_z_fraction"] * v["L2"]
+        _L_rer_r2 = v["L1"] + v["rear_z_fraction"]  * v["L2"]
+        _Lspan_r2 = max(_L_rer_r2 - _L_oh_r2, 1.0)
+        P_front_N = F_nom_N * (_L_oh_r2 + _Lspan_r2) / _Lspan_r2
 
         # ── Fig 11a: KPI Radar ────────────────────────────────────────────
         labels = ["Deflection\n(≤15μm)", "FoS\n(≥2.0)", "L10×target",

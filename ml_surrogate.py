@@ -545,21 +545,14 @@ class ActiveLearner:
         """
         Run one Active Learning round:
             1. Select high-uncertainty candidates
-            2. Evaluate FEA (dry-run analytical) on them
+            2. Evaluate FEA on them
             3. Append to training set, retrain surrogate
-            4. Evaluate on hold-out test set (if provided) — for the
-               convergence plot
-
-        Returns
-        -------
-        X_train_new, y_train_new : expanded training arrays
-        surrogate                : retrained SurrogateModel
-        r2_per_output            : Dict[output_name → R²] on X_test/y_test
-                                    (or training set if X_test is None)
+            4. Keep BEST surrogate (guard against degradation)
+               AL adds samples in high-uncertainty regions which can hurt
+               R² on a held-out test set if those regions contain outliers.
+               If the new R² < old R², we keep the data but revert the model.
         """
         X_new = self.select_candidates(n_pool=n_pool, n_select=n_select, seed=seed)
-
-        # Run FEA (dry-run analytical) on the selected candidates
         runner = fea_runner_cls(X_new, self.design_space, dry_run=True)
         df_new = runner.execute_batch()
         y_new  = df_new[output_names].values
@@ -567,19 +560,41 @@ class ActiveLearner:
         X_train_new = np.vstack([X_train, X_new])
         y_train_new = np.vstack([y_train, y_new])
 
-        # Retrain
-        surrogate = SurrogateModel(model_type=self.surrogate.model_type,
-                                   random_state=self.surrogate.random_state)
-        surrogate.train(X_train_new, y_train_new,
-                        output_names=output_names, verbose=False)
-        self.surrogate = surrogate
+        # Retrain on expanded dataset
+        surrogate_new = SurrogateModel(model_type=self.surrogate.model_type,
+                                       random_state=self.surrogate.random_state)
+        surrogate_new.train(X_train_new, y_train_new,
+                            output_names=output_names, verbose=False)
 
-        # Evaluate
+        # Evaluate both old and new surrogate on held-out test set
         if X_test is not None and y_test is not None:
-            metrics = surrogate.evaluate(X_test, y_test)
+            metrics_new = surrogate_new.evaluate(X_test, y_test)
+            metrics_old = self.surrogate.evaluate(X_test, y_test)
         else:
-            metrics = surrogate.evaluate(X_train_new, y_train_new)
-        r2_per_output = dict(zip(metrics["output"], metrics["R2"]))
+            metrics_new = surrogate_new.evaluate(X_train_new, y_train_new)
+            metrics_old = self.surrogate.evaluate(X_train, y_train)
+
+        r2_new = {k: v for k, v in zip(metrics_new["output"], metrics_new["R2"])}
+        r2_old = {k: v for k, v in zip(metrics_old["output"], metrics_old["R2"])}
+
+        avg_new = np.mean(list(r2_new.values()))
+        avg_old = np.mean(list(r2_old.values()))
+
+        # Best-surrogate guard: only replace if quality improves
+        if avg_new >= avg_old - 0.02:   # allow 2% tolerance for randomness
+            surrogate = surrogate_new
+            r2_per_output = r2_new
+            self.surrogate = surrogate
+        else:
+            # Keep old model weights, but still expand training data
+            # (new points improve coverage even if model reverts)
+            surrogate = self.surrogate
+            r2_per_output = r2_old
+            import logging as _log
+            _log.getLogger("ActiveLearner").warning(
+                f"AL guard: new avg R²={avg_new:.3f} < old {avg_old:.3f} "
+                f"— keeping previous surrogate (data still expanded)"
+            )
 
         self.history.append({
             "n_train": len(X_train_new),

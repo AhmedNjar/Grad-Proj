@@ -632,9 +632,33 @@ class RobustOptimizer:
         _Fr  = float(var_dict.get("Fr", 1000.0))
         _F_res = math.sqrt(_Ft**2 + _Fr**2)   # resultant (both bend the shaft)
         _I   = max(math.pi / 4.0 * (_R1**4 - _ri**4), 1.0)
+        # Source 1: Bending slope
         _theta     = (_F_res * _L_oh**2) / (2.0 * _E * _I)
-        _TIR_slope = abs(_theta * _L_oh) * 1000.0   # μm (before amp)
-        f3 += 1500.0 * max(0.0, _TIR_slope - _TIR_LIMIT)
+        _TIR_slope = abs(_theta * _L_oh) * 1000.0
+
+        # Source 2: Positional tolerance front bearing seat — was 16.3μm dominant!
+        _pos_f     = float(var_dict.get("pos_tol_front_um", 10.0))
+        _TIR_pos_f = (_pos_f / 2.0) * _amp
+
+        # Source 3: Housing bore eccentricity — e = IT/4
+        _hg  = round(max(5, min(8, float(var_dict.get("housing_it_grade", 7.0)))))
+        _ITH = {5: 18.0, 6: 25.0, 7: 40.0, 8: 63.0}[_hg]
+        _TIR_hous = (_ITH / 4.0) * _amp   # amplified to nose (module 09 §_housing_tir)
+
+        # RSS TIR (dominant sources) → penalty
+        _TIR_total = math.sqrt(_TIR_slope**2 + _TIR_pos_f**2 + _TIR_hous**2)
+        f3 += 1500.0 * max(0.0, _TIR_total - _TIR_LIMIT)
+
+        # Speed limit penalty — Ø120mm: n_grease=3600rpm < 4000rpm
+        try:
+            from bearing_catalog import snap_to_bearing as _sb
+            _b, _, _ = _sb(float(var_dict.get("R2", 60.0)), "ACBB",
+                           self.n_rpm, "grease",
+                           manufacturer=self.bearing_manufacturer)
+            if not _b.speed_ok(self.n_rpm, "grease"):
+                f3 += 3000.0 * max(0.0, self.n_rpm - _b.n_grease) / 100.0
+        except Exception:
+            pass
 
         # ── f8: Chatter Stability Ratio (option C — constraint + objective) ─
         _, K_dyn = self._bearing_cached(var_dict)   # reuses f5's cached lookup
