@@ -145,6 +145,60 @@ class RDOMasterOrchestrator:
         log.info(f"Bearing arrangement:\n{self.arr.description()}")
 
     # ─────────────────────────────────────────────────────────────────────────
+    # Stage 0 — Physics Validation (Module 15)
+    # ─────────────────────────────────────────────────────────────────────────
+    def stage_validation(self) -> dict:
+        """
+        Pre-flight physics sanity check: benchmark the framework's analytical
+        models (beam deflection/frequency, chatter stability, ISO 281 L10,
+        bearing stiffness, thermal softening) against six independent
+        published references (closed-form solutions, Cao & Altintas 2007,
+        Altintas 2012, SKF/FAG catalogs, ASM Handbook).
+
+        Runs in seconds — no FEA or optimisation dependency — so it is safe
+        to run before every full pipeline invocation as a regression check.
+        Set --skip_validation to disable, or --validation_strict to abort
+        the pipeline if any benchmark fails its acceptance threshold.
+        """
+        log.info("\n── STAGE 0: PHYSICS VALIDATION (Module 15) ─────────────────────")
+        M = self.m
+        if "validation" not in M:
+            log.warning("   15_validation module not available — skipping.")
+            return {"n_pass": 0, "n_fail": 0, "results": []}
+
+        summary = M["validation"].run_all_validations(verbose=False)
+        log.info(f"   {summary['n_pass']}/{len(summary['results'])} benchmark "
+                 f"checks passed ({summary['pass_rate']:.0f}%)")
+        for r in summary["results"]:
+            tag = "✅" if r.passed else "❌"
+            log.info(f"     {tag} {r.name:<48} err={r.error_pct:.1f}%")
+
+        if not self.config.get("no_plots", False):
+            try:
+                M["validation"].plot_validation_summary(
+                    summary, save_path=str(self.plot_dir / "15a_validation_summary.png"),
+                )
+            except Exception as e:
+                log.warning(f"   Validation plot skipped: {e}")
+
+        if summary["n_fail"] > 0:
+            msg = (f"   ⚠️  {summary['n_fail']} physics benchmark(s) failed — "
+                   f"review Module 15 output before trusting downstream results.")
+            if self.config.get("validation_strict", False):
+                log.error(msg.replace("⚠️", "❌") +
+                          "  --validation_strict is set: aborting pipeline.")
+                raise RuntimeError(
+                    f"{summary['n_fail']} physics validation benchmark(s) failed "
+                    f"under --validation_strict."
+                )
+            else:
+                log.warning(msg)
+        else:
+            log.info("   ✅ All physics benchmarks passed.")
+
+        return summary
+
+    # ─────────────────────────────────────────────────────────────────────────
     # Stage 1 — LHS Sampling
     # ─────────────────────────────────────────────────────────────────────────
     def stage_lhs(self) -> np.ndarray:
@@ -182,6 +236,10 @@ class RDOMasterOrchestrator:
             path = self.out_dir / "lhs_samples.csv"
             sampler.save_samples(X, str(path), fmt="csv")
             return X
+        
+        if existing_vars.shape[1] != len(self.ds.get_variable_names()):
+            log.warning("Existing CSV variables do not match current DesignSpace. Starting fresh.")
+            existing_vars = []
 
         # 2. خوارزمية ملء الفراغات الذكية (Space-Filling Infill)
         # حساب الـ Range (المدى) لكل متغير لتفادي مشكلة اختلاف الوحدات (مثل RPM بآلاف والمليمتر بعشرات)
@@ -377,6 +435,14 @@ class RDOMasterOrchestrator:
                 al_rounds   = int(self.config.get("al_rounds", 2))
                 al_n_select = int(self.config.get("al_n_select", 8))
                 al_pool     = int(self.config.get("al_pool_size", 300))
+                # Default False → full ANSYS MAPDL. AL exists to refine the
+                # surrogate exactly where it's weakest; evaluating those
+                # points with the fast approximate solver would refine
+                # against the wrong physics. Override with --al_dry_run
+                # only when ANSYS is unavailable on this machine.
+                al_dry_run  = bool(self.config.get("al_dry_run", False))
+                fidelity    = "DRY-RUN (analytical)" if al_dry_run else "FULL ANSYS MAPDL"
+                log.info(f"   AL fidelity: {fidelity}")
 
                 al = M["ml_surrogate"].ActiveLearner(self.ds, surr)
                 # Record round-0 (initial) R² for the convergence plot
@@ -393,7 +459,7 @@ class RDOMasterOrchestrator:
                     X_cur, y_cur, surr, r2 = al.run_round(
                         X_cur, y_cur, out_cols, M["fea_pool_runner"].FEAPoolRunner,
                         n_pool=al_pool, n_select=al_n_select, seed=100+r,
-                        X_test=X_te, y_test=y_te,
+                        X_test=X_te, y_test=y_te, dry_run=al_dry_run,
                     )
                     r2_str = "  ".join(f"{k}={v:.3f}" for k,v in r2.items())
                     log.info(f"     n_train={len(X_cur)}  R²: {r2_str}")
@@ -541,7 +607,14 @@ class RDOMasterOrchestrator:
         cost_model  = M["selective_assembly"].SpindleCostModel()
 
         sa_results = sa_analyser.analyse_all(var_dict, n_bins=5)
-        costs      = cost_model.total_cost(var_dict, sa_results)
+        tolerance_cost_usd = None
+        if hasattr(self, "_last_tolerance_cost"):
+            tolerance_cost_usd = self._last_tolerance_cost
+        costs = cost_model.total_cost(
+            var_dict,
+            sa_results,
+            tolerance_cost_usd=tolerance_cost_usd,
+        )
 
         log.info("   SA Results (5 bins):")
         for r in sa_results:
@@ -781,9 +854,10 @@ class RDOMasterOrchestrator:
             z_f, z_r = M["shaft_runout"].get_bearing_positions_from_design(var_dict, self.arr)
         Fr_N = float(np.sqrt(var_dict["Ft"]**2 + var_dict["Fr"]**2))
 
+        target_tir = float(self.config.get("tir_limit", 35.0))
         analyser = M["shaft_runout"].ShaftRunoutAnalyser(
             precision_class="P5", straightness_grade="precision",
-            tir_geometric_limit=10.0, tir_loaded_limit=20.0,  # Option C: Class B limit
+            tir_geometric_limit=10.0, tir_loaded_limit=target_tir,
             preload_class="MA", lubrication="grease",
         )
         bd  = analyser.analyse(var_dict, z_f, z_r,
@@ -945,8 +1019,10 @@ class RDOMasterOrchestrator:
             L10_base_hours= L10_base,
         )
 
+        target_tir = float(self.config.get("tol_limit", 18.0))
+
         opt    = M["tolerance_optimizer"].ToleranceOptimizer(
-            ev, tir_limit_um=12.0, l10_loss_max_pct=20.0, n_weights=15,
+            ev, tir_limit_um=target_tir, l10_loss_max_pct=20.0, n_weights=15,
         )
         pareto = opt.run(verbose=True)
         best   = opt.best_by_priority(pareto, priority="cost")
@@ -1013,14 +1089,16 @@ class RDOMasterOrchestrator:
                             sp_pr.iso_fit_equiv, "", "", "circular zone", "ISO 1101:2017"])
         log.info(f"   Tolerance spec saved → {tol_path}")
 
+        self._last_tolerance_cost = float(best.cost_usd)
         return pareto, best
     def stage_final_report(self, x_opt: np.ndarray, bearing_state: object,
                            runout_bd: object, ecc_result: object,
                            fea_row, n_rpm: float) -> None:
         log.info("\n── STAGE 10: FINAL ENGINEERING REPORT ──────────────────────────")
         M       = self.m
+        target_tir = float(self.config.get("tir_limit", 35.0))
         builder = M["final_report"].FinalReportBuilder(
-            FoS_min=2.0, delta_max_um=20.0, tir_limit_um=20.0, L10_target_hours=20000,  # Option C
+            FoS_min=2.0, delta_max_um=20.0, tir_limit_um=target_tir, L10_target_hours=20000,  # Option C: RSS limit
             chatter_Ks         = self.config.get("chatter_Ks",         2500.0),
             chatter_zeta       = self.config.get("chatter_zeta",       0.03),
             chatter_b_required = self.config.get("chatter_b_required", 2.0),
@@ -1053,6 +1131,10 @@ class RDOMasterOrchestrator:
     def run_full(self) -> None:
         n_rpm = float(self.config.get("n_rpm", 4000))
 
+        # 0. Physics validation (Module 15) — pre-flight sanity check
+        if not self.config.get("skip_validation", False):
+            self.stage_validation()
+
         # 1. Design space plot
         if not self.config["no_plots"]:
             log.info("   Generating design-space plots...")
@@ -1075,10 +1157,7 @@ class RDOMasterOrchestrator:
             var_d, self.arr)
         span = max(z_r - z_f, 1.0)
 
-        # 5. Selective Assembly
-        self.stage_selective_assembly(var_d)
-
-        # 6. Bearing Performance
+        # 5. Bearing Performance
         bearing_state = self.stage_bearing_performance(x_opt, n_rpm)
 
         # 7. FEA single-point for reporting
@@ -1105,7 +1184,10 @@ class RDOMasterOrchestrator:
             x_opt, delta_nose_um, bearing_state.L10_system_hours, z_f, z_r,
         )
 
-        # 12. Final report
+        # 12. Selective Assembly (uses the tolerance optimizer's total cost)
+        self.stage_selective_assembly(var_d)
+
+        # 13. Final report
         self.stage_final_report(x_opt, bearing_state, runout_bd,
                                  ecc_result, fea_row, n_rpm)
 
@@ -1124,6 +1206,8 @@ class RDOMasterOrchestrator:
     # ml_only — load existing FEA CSV
     # ─────────────────────────────────────────────────────────────────────────
     def run_ml_only(self) -> None:
+        if not self.config.get("skip_validation", False):
+            self.stage_validation()
         fea_csv = self.config.get("fea_csv")
         if not fea_csv or not Path(fea_csv).exists():
             log.error(f"FEA CSV not found: {fea_csv}")
@@ -1137,12 +1221,73 @@ class RDOMasterOrchestrator:
     # opt_only — load pre-trained surrogate
     # ─────────────────────────────────────────────────────────────────────────
     def run_opt_only(self) -> None:
+        if not self.config.get("skip_validation", False):
+            self.stage_validation()
         pkl = self.config.get("surrogate_pkl")
         if not pkl or not Path(pkl).exists():
             log.error(f"Surrogate pkl not found: {pkl}")
             return
         surr = self.m["ml_surrogate"].SurrogateModel.load(pkl)
         self.stage_optimize(surr)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # from_surrogate — resume from saved surrogate + FEA dataset, skipping
+    # the costly LHS/FEA-pool/surrogate-training stages entirely
+    # ─────────────────────────────────────────────────────────────────────────
+    def run_from_surrogate(self) -> None:
+        if not self.config.get("skip_validation", False):
+            self.stage_validation()
+
+        fea_csv = self.config.get("fea_csv")
+        pkl     = self.config.get("surrogate_pkl")
+        if not fea_csv or not Path(fea_csv).exists():
+            log.error(f"FEA CSV not found: {fea_csv}")
+            return
+        if not pkl or not Path(pkl).exists():
+            log.error(f"Surrogate pkl not found: {pkl}")
+            return
+
+        n_rpm = float(self.config.get("n_rpm", 4000))
+        df    = pd.read_csv(fea_csv)
+        surr  = self.m["ml_surrogate"].SurrogateModel.load(pkl)
+        log.info(f"   Resumed surrogate ({surr.model_type}) from {pkl}")
+        log.info(f"   Resumed FEA dataset ({len(df)} rows) from {fea_csv}")
+
+        opt_result = self.stage_optimize(surr)
+        x_opt = opt_result.best_robust_design
+        var_d = self.ds.decode_vector(x_opt)
+
+        z_f, z_r = self.m["shaft_runout"].get_bearing_positions_from_design(
+            var_d, self.arr)
+        span = max(z_r - z_f, 1.0)
+
+        bearing_state = self.stage_bearing_performance(x_opt, n_rpm)
+
+        M = self.m
+        fea_df = M["fea_pool_runner"].FEAPoolRunner(
+            np.array([x_opt]), self.ds,
+            dry_run=self.config.get("dry_run", True)).execute_batch()
+        fea_row = fea_df.iloc[0]
+        delta_nose_um = float(fea_row["static_max_deflection_um"])
+
+        runout_bd  = self.stage_runout(var_d, delta_nose_um, n_rpm, z_f, z_r)
+        ecc_result = self.stage_eccentricity(var_d, n_rpm, span)
+        self.stage_reliability(x_opt, surr, delta_nose_um, n_rpm)
+        self.stage_inverse_design(df)
+        self.stage_tolerance_optimization(
+            x_opt, delta_nose_um, bearing_state.L10_system_hours, z_f, z_r,
+        )
+        self.stage_selective_assembly(var_d)
+        self.stage_final_report(x_opt, bearing_state, runout_bd,
+                                 ecc_result, fea_row, n_rpm)
+
+        plots = sorted([f for f in os.listdir(self.plot_dir) if f.endswith(".png")])
+        log.info("\n" + "="*72)
+        log.info(f"  ✅ RESUME-FROM-SURROGATE WORKFLOW COMPLETE")
+        log.info(f"  Output dir  : {self.out_dir}")
+        log.info(f"  Plots dir   : {self.plot_dir}")
+        log.info(f"  Plots generated: {len(plots)}")
+        log.info("="*72)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1200,8 +1345,25 @@ def parse_args():
                    help="New FEA samples added per AL round (default 8)")
     p.add_argument("--al_pool_size",  type=int, default=300,
                    help="LHS candidate pool size per AL round (default 300)")
+    p.add_argument("--al_dry_run",    action="store_true",
+                   help="Use the fast analytical solver for Active Learning "
+                        "rounds instead of full ANSYS MAPDL (default: MAPDL). "
+                        "Only use this when ANSYS is unavailable on this "
+                        "machine — mixing fidelity levels between the main "
+                        "FEA pool and AL refinement undermines AL's purpose.")
+
+    # ── Physics validation (Module 15) ────────────────────────────────────
+    p.add_argument("--skip_validation",   action="store_true",
+                   help="Skip the Module 15 physics benchmark pre-flight check")
+    p.add_argument("--validation_strict", action="store_true",
+                   help="Abort the pipeline if any Module 15 benchmark fails "
+                        "its acceptance threshold (default: warn and continue)")
 
     # ── Optimisation ──────────────────────────────────────────────────────
+    p.add_argument("--tir_limit", type=float, default=30.0,
+                   help="Maximum allowable TIR at spindle nose [μm] (default 30.0)")
+    p.add_argument("--tol_limit", type=float, default=15.0,
+                   help="Maximum allowable tolerances [μm] (default 15.0)")
     p.add_argument("--opt_method", default="nsga3",
                    choices=["de", "nsga2", "nsga3"],
                    help="Optimisation algorithm "

@@ -9,37 +9,37 @@
   ────────────────────────────────────────────────────────────────────
 
   Shaft Geometry (ISO 286-1)
-    L1 — Nose section                       60.871  mm     Nose to front bearing
-    L2 — Journal section                   410.746  mm     Front to rear bearing span zone
-    L3 — Drive section                      17.790  mm     Rear bearing to drive end
-    L4 — Chuck flange                       21.943  mm     Chuck mounting face width
-    R1 — Nose outer radius                  53.676  mm     Spindle nose OD/2
-    R2 — Journal radius                     54.934  mm     Bearing seat OD/2
-    R3 — Rear journal radius                72.473  mm     Rear CRB seat OD/2
-    R4 — Drive end radius                   36.838  mm     Drive coupling OD/2
-    ri — Inner bore radius                  34.939  mm     Hollow bore radius
-    Wall thickness                          19.995  mm     At bearing seat
+    L1 — Nose section                       60.173  mm     Nose to front bearing
+    L2 — Journal section                   350.888  mm     Front to rear bearing span zone
+    L3 — Drive section                      15.512  mm     Rear bearing to drive end
+    L4 — Chuck flange                       19.813  mm     Chuck mounting face width
+    R1 — Nose outer radius                  40.870  mm     Spindle nose OD/2
+    R2 — Journal radius                     55.016  mm     Bearing seat OD/2
+    R3 — Rear journal radius                72.147  mm     Rear CRB seat OD/2
+    R4 — Drive end radius                   36.525  mm     Drive coupling OD/2
+    ri — Inner bore radius                  29.319  mm     Hollow bore radius
+    Wall thickness                          25.697  mm     At bearing seat
 
   Bearing Positions
-    Overhang (nose→front brg)              101.998  mm     = L1 + f_front×L2
-    front_z_fraction                         0.100  —      Fraction of L2
-    rear_z_fraction                          0.743  —      Fraction of L2
+    Overhang (nose→front brg)               98.191  mm     = L1 + f_front×L2
+    front_z_fraction                         0.108  —      Fraction of L2
+    rear_z_fraction                          0.834  —      Fraction of L2
 
   Material Properties
-    E — Young's modulus                    214.570  GPa    At 20°C
-    σ_y — Yield strength                   664.779  MPa    Tensile yield
-    ρ — Density                              7.769  kg/m³  For imbalance calc
+    E — Young's modulus                    213.675  GPa    At 20°C
+    σ_y — Yield strength                   725.049  MPa    Tensile yield
+    ρ — Density                              7.787  kg/m³  For imbalance calc
 
   Operating Point
-    Ft — Tangential force                 1051.532  N      Primary cutting force
-    Fr — Radial force                      366.742  N      Radial cutting force
-    Ff — Feed force                        929.426  N      Feed direction force
-    F_resultant                           1113.652  N      RSS of Ft,Fr
+    Ft — Tangential force                 1009.768  N      Primary cutting force
+    Fr — Radial force                      314.716  N      Radial cutting force
+    Ff — Feed force                        236.040  N      Feed direction force
+    F_resultant                           1057.676  N      RSS of Ft,Fr
     n_rpm                                 4000.000  RPM    Operating speed
 
   Housing Tolerance
-    housing_it_grade                         5.596  —      IT grade number: 5=H5, 6=H6, 7=H7, 8=H8 (ISO 286-1)
-    housing_it_designation                      H6  —      Non-rotating outer ring (ISO 15:2017 Table 2)
+    housing_it_grade                         7.451  —      IT grade number: 5=H5, 6=H6, 7=H7, 8=H8 (ISO 286-1)
+    housing_it_designation                      H7  —      Non-rotating outer ring (ISO 15:2017 Table 2)
 
   ─── 1. BEARING BILL OF MATERIALS (SKF Catalog) ───────────────
   FRONT (locating)  : B7222-C-T-P4S
@@ -51,8 +51,8 @@
     Bore d = 110 mm  OD D = 200 mm  B = 53 mm
     C_r = 270.0 kN  |  n_grease = 3400 RPM
 
-  Raw R2 = 54.934 mm → bore = 109.87 mm
-  Catalog bore = 110 mm  |  Snap error = 0.12%  ✅
+  Raw R2 = 55.016 mm → bore = 110.03 mm
+  Catalog bore = 110 mm  |  Snap error = 0.03%  ✅
 
   ─── 1b. CHATTER STABILITY (Altintas 2012) ────────────────────
   K_dyn (front pair) = 317,582 N/mm
@@ -63,60 +63,60 @@
   Chatter ratio b_req/b_lim     = 0.255  ✅ STABLE
 
   ─── 2. STATIC STRUCTURAL PERFORMANCE ─────────────────────────
-  Deflection at nose  :     7.62 μm  (limit 20 μm)  ✅
-  Max bending stress  :     1.14 MPa  (yield 665 MPa)
-  Static Safety Fac.  :    583.2    (min 2.0)  ✅  [σ_y/σ_max — static only]
-  First nat. freq.    :    510.3 Hz
+  Deflection at nose  :     7.20 μm  (limit 20 μm)  ✅
+  Max bending stress  :     2.63 MPa  (yield 725 MPa)
+  Static Safety Fac.  :    275.2    (min 2.0)  ✅  [σ_y/σ_max — static only]
+  First nat. freq.    :    539.4 Hz
 
-  ⚠️  Note: σ = 1.1 MPa is physically correct.
-  This thick-walled spindle (wall = 18.7 mm) at short
-  overhang (a = 102 mm) has very low bending stress.
+  ⚠️  Note: σ = 2.6 MPa is physically correct.
+  This thick-walled spindle (wall = 11.6 mm) at short
+  overhang (a = 98 mm) has very low bending stress.
   DEFLECTION is the active constraint — not stress.
 
   ─── 3. CUTTING FORCE ENVELOPE ─────────────────────────────────
   F_min  (bearing min load, ISO 281) :   1480.0 N
-  F_nom  (current operating)         :   1113.7 N
-  F_max  (δ ≤ 20 μm AND FoS ≥ 2)       :  74817.9 N
-  Headroom to F_max                  :    98.5%
+  F_nom  (current operating)         :   1057.7 N
+  F_max  (δ ≤ 20 μm AND FoS ≥ 2)       :  83591.4 N
+  Headroom to F_max                  :    98.7%
   Active limit: deflection
-  F_cutting = 1113.7 N  →  P_front = 1543.9 N  (cantilever ×1.39)
-  F_nom in safe envelope: ✅
+  F_cutting = 1057.7 N  →  P_front = 1465.3 N  (cantilever ×1.39)
+  F_nom in safe envelope: ❌ OUT OF ENVELOPE
 
   ─── 4. BEARING LIFE (ISO 281) ──────────────────────────────────
-  System L10 life :  5,508,216 h  (target 20000 h)  ✅
-  L10 margin      :      27441%  (275.4× target)
-  Station FRONT : B7222-C-T-P4S         P = 2001 N  L10 = 7,082,026 h
+  System L10 life :  5,803,549 h  (target 20000 h)  ✅
+  L10 margin      :      28918%  (290.2× target)
+  Station FRONT : B7222-C-T-P4S         P = 1949 N  L10 = 7,722,437 h
   Station REAR  : NU2222 ECP            P = 2700 N  L10 = 19,339,953 h
 
   ─── 5. RUNOUT BUDGET (all analytical sources) ─────────────────
-  Bearing (ISO 492)         :  6.932 μm   12.4%  ██                  
-  Straightness              :  1.020 μm    0.3%                      
-  ANSYS deflection          :  7.618 μm   15.0%  ██                  
-  Bending slope             :  0.515 μm    0.1%                      
+  Bearing (ISO 492)         :  6.927 μm   11.3%  ██                  
+  Straightness              :  0.982 μm    0.2%                      
+  ANSYS deflection          :  7.195 μm   12.2%  ██                  
+  Bending slope             :  1.454 μm    0.5%                      
   Thermal ΔT                :  0.094 μm    0.0%                      
-  Pos.tol front             : 13.979 μm   50.4%  ██████████          
-  Pos.tol rear              :  3.115 μm    2.5%                      
-  Housing bore (ISO 286)    :  8.664 μm   19.4%  ███                 
+  Pos.tol front             :  8.950 μm   18.8%  ███                 
+  Pos.tol rear              :  7.147 μm   12.0%  ██                  
+  Housing bore (ISO 286)    : 13.854 μm   45.1%  █████████           
   ─────────────────────────────────────────────────────────────────
-  TIR (RSS)                 : 19.687 μm  (limit 20 μm)  ✅
-  TIR (linear)              : 41.936 μm  (worst-case)
+  TIR (RSS)                 : 20.639 μm  (limit 30 μm)  ✅
+  TIR (linear)              : 46.604 μm  (worst-case)
   ΔT thermal model    : 0.6 °C  @ 4000 RPM, MA preload
 
   ─── 6. ROTOR ECCENTRICITY (ISO 1940-1 G2.5) ────────────────────
-  Static eccentricity :   3.415 μm
-  Couple imbalance C  :  -157.9 g·mm²
-  F_imbalance @ 4000  :  13.366 N
-  U_static            :    76.2 g·mm
-  U_allow (G2.5)      :   133.1 g·mm  ✅
+  Static eccentricity :   2.165 μm
+  Couple imbalance C  :  -806.2 g·mm²
+  F_imbalance @ 4000  :   8.236 N
+  U_static            :    46.9 g·mm
+  U_allow (G2.5)      :   129.4 g·mm  ✅
   Balancing required  : NO ✅
 
   ─── 7. BORE STRATEGY ANALYSIS ──────────────────────────────────
-  Raw optimizer bore : 109.87 mm  (not in SKF catalog)
+  Raw optimizer bore : 110.03 mm  (not in SKF catalog)
   Strategy       Bore     Gap      C_r    n_gr   Speed        K_r
   ─────────────────────────────────────────────────────────────────
-  A_nearest      110mm   0.13mm   148.0kN   4000rpm ✅       318N/μm ← RECOMMENDED
-  B_smaller      105mm   4.87mm   136.0kN   4300rpm ✅       307N/μm
-  C_larger       120mm  10.13mm   163.0kN   3600rpm ❌       339N/μm
+  A_nearest      110mm   0.03mm   148.0kN   4000rpm ✅       318N/μm ← RECOMMENDED
+  B_smaller      105mm   5.03mm   136.0kN   4300rpm ✅       307N/μm
+  C_larger       120mm   9.97mm   163.0kN   3600rpm ❌       339N/μm
 
   Catalog-snap penalty in optimizer: 500 USD/mm gap
   This steers future optimizations toward exact catalog bores.
@@ -124,23 +124,23 @@
   ─── 8. RECOMMENDED TOLERANCES (for drawing / BOM) ─────────────
   Feature                             Fit/Tol           Dev +    Dev −  Standard
   ─────────────────────────────────────────────────────────────────────────────────────
-  Bearing journal  Ø109.9mm           js5              +7.5μm   -7.5μm  ISO 286-1:2010, ISO 15:2017
+  Bearing journal  Ø110.0mm           js5              +7.5μm   -7.5μm  ISO 286-1:2010, ISO 15:2017
   Housing bore  Ø140mm (OD fit)       H6              +22.0μm   -0.0μm  ISO 286-1:2010, ISO 15:2017 Table 2
-  Inner bore  Ø69.9mm                 H7              +21.0μm   -0.0μm  ISO 286-1:2010
+  Inner bore  Ø58.6mm                 H7              +21.0μm   -0.0μm  ISO 286-1:2010
   Front bearing seat position  ⊕      ⊕ ϕ0.008         +4.0μm   -4.0μm  ISO 1101:2017 §15
   Rear bearing seats position  ⊕      ⊕ ϕ0.012         +6.0μm   -6.0μm  ISO 1101:2017 §15
   Bearing seat roundness  ○           ○ 0.0025         +2.5μm   -0.0μm  ISO 492:2014, ISO 1101:2017
   Bearing face parallelism  ∥         ∥ 0.003          +3.0μm   -0.0μm  ISO 1101:2017, SKF Engineering Handbook §3.4
 
   ─── 9. PASS/FAIL SCORECARD ─────────────────────────────────────
-  ✅ PASS  Nose deflection               7.62 / 20.00    μm      █████          
-  ✅ PASS  Factor of safety            583.23 / 2.00     —                      
-  ✅ PASS  System L10 life            5508.22 / 20.00    kh                     
-  ✅ PASS  Runout TIR (RSS)             19.69 / 20.00    μm      ██████████████ 
-  ✅ PASS  Imbalance U                  76.18 / 133.13   g·mm    ████████       
-  ✅ PASS  Bore snap error               0.12 / 2.00     %                      
-  ✅ PASS  F_nom in envelope             1.00 / 1.00     —       ███████████████
+  ✅ PASS  Nose deflection               7.20 / 20.00    μm      █████          
+  ✅ PASS  Factor of safety            275.19 / 2.00     —                      
+  ✅ PASS  System L10 life            5803.55 / 20.00    kh                     
+  ✅ PASS  Runout TIR (RSS)             20.64 / 30.00    μm      ██████████     
+  ✅ PASS  Imbalance U                  46.94 / 129.37   g·mm    █████          
+  ✅ PASS  Bore snap error               0.03 / 2.00     %                      
+  ❌ FAIL  F_nom in envelope             0.00 / 1.00     —       ███████████████
 
-  Overall: ALL CRITICAL KPIs PASSED ✅
+  Overall: CRITICAL FAILURES ❌ — redesign required
 ══════════════════════════════════════════════════════════════════════
 

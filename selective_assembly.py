@@ -154,6 +154,7 @@ class SpindleCostModel:
 
     def __init__(self, params: Optional[ShopCostParams] = None):
         self.p = params or ShopCostParams()
+        self._machining_cost_cache: Dict[Tuple[object, ...], float] = {}
 
     # ─────────────────────────────────────────────────────────────────────────
     # Material cost
@@ -192,42 +193,64 @@ class SpindleCostModel:
     # ─────────────────────────────────────────────────────────────────────────
     def machining_cost(self, var_dict: Dict[str, float]) -> float:
         """
-        Turning + grinding cost.
+        Tolerance-driven machining cost.
 
-        Tolerances below the grinding_threshold_mm require a grinding pass,
-        which costs significantly more than turning.  The cost scales inversely
-        with tolerance width (tighter → more expensive).
+        This replaces the old rough turning/grinding estimate with a direct
+        tolerance-cost model based on IT grades and surface roughness, so the
+        machining line in the selective-assembly cost breakdown reflects the
+        tolerance specification expense.
         """
-        # Critical tolerances for each feature (bilateral ±)
-        tolerances = {
-            "journal_dia":   0.025,    # ±25 μm turning, ±5 μm ground
-            "bore_dia":      0.010,    # inner bore
-            "flange_face":   0.005,    # flatness (grinding)
-            "outer_profile": 0.050,    # rough OD (turning)
-        }
+        try:
+            from tolerance_optimizer import compute_cost
+        except Exception:
+            # Fallback if the tolerance module is unavailable.
+            return 0.0
 
-        R2 = var_dict["R2"]           # journal radius → diameter = 2×R2
-        L2 = var_dict["L2"]           # journal length
+        key = (
+            round(float(var_dict.get("R2", 0.0)), 5),
+            round(float(var_dict.get("L2", 0.0)), 5),
+            str(var_dict.get("it_journal", "IT5")),
+            str(var_dict.get("it_bore", "IT7")),
+            str(var_dict.get("it_lengths", "IT12")),
+            str(var_dict.get("housing_it_grade", 6.0)),
+            round(float(var_dict.get("ra_journal_um", 0.8)), 5),
+            round(float(var_dict.get("ra_bore_um", 1.6)), 5),
+        )
+        if key in self._machining_cost_cache:
+            return self._machining_cost_cache[key]
 
-        cost = 0.0
+        journal_it = str(var_dict.get("it_journal", "IT5"))
+        if not isinstance(var_dict.get("it_journal", "IT5"), str):
+            journal_it = f"IT{int(round(float(var_dict.get('it_journal', 5))))}"
 
-        for feature, tol in tolerances.items():
-            # Representative surface area for cost scaling
-            if "journal" in feature:
-                area = 2 * np.pi * R2 * L2     # mm²
-            else:
-                area = 2 * np.pi * R2 * 20.0   # nominal 20 mm for other features
+        bore_it = str(var_dict.get("it_bore", "IT7"))
+        if not isinstance(var_dict.get("it_bore", "IT7"), str):
+            bore_it = f"IT{int(round(float(var_dict.get('it_bore', 7))))}"
 
-            # Tolerance premium: exponential as tol → 0
-            tol_premium = np.exp(-(tol / 0.05) * 2.0)   # normalised
+        length_it = str(var_dict.get("it_lengths", "IT12"))
+        if not isinstance(var_dict.get("it_lengths", "IT12"), str):
+            length_it = f"IT{int(round(float(var_dict.get('it_lengths', 12))))}"
 
-            if tol < self.p.grinding_threshold_mm:
-                rate = self.p.cost_per_tol_mm_grinding
-            else:
-                rate = self.p.cost_per_tol_mm_turning
+        housing_it = var_dict.get("housing_it_grade", 6.0)
+        if isinstance(housing_it, str):
+            housing_it_grade = housing_it
+        else:
+            housing_it_grade = f"IT{int(round(float(housing_it)))}"
 
-            cost += rate * (area / 1e4) * (1.0 + tol_premium)   # area in cm²
+        ra_journal_um = float(var_dict.get("ra_journal_um", 0.8))
+        ra_bore_um    = float(var_dict.get("ra_bore_um", 1.6))
 
+        cost = float(compute_cost(
+            it_journal_grade=journal_it,
+            it_bore_grade=bore_it,
+            it_length_grade=length_it,
+            it_housing_grade=housing_it_grade,
+            ra_journal_um=ra_journal_um,
+            ra_bore_um=ra_bore_um,
+            n_journals=4,
+            n_lengths=4,
+        ))
+        self._machining_cost_cache[key] = cost
         return cost
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -281,6 +304,7 @@ class SpindleCostModel:
         self,
         var_dict: Dict[str, float],
         sa_results: Optional[List[SelectiveAssemblyResult]] = None,
+        tolerance_cost_usd: Optional[float] = None,
     ) -> Dict[str, float]:
         """
         Compute and return all cost components plus the total.
@@ -293,7 +317,11 @@ class SpindleCostModel:
             Dict with keys: material, machining, bearings, sa, total
         """
         c_mat  = self.material_cost(var_dict)
-        c_mach = self.machining_cost(var_dict)
+        c_mach = (
+            float(tolerance_cost_usd)
+            if tolerance_cost_usd is not None
+            else self.machining_cost(var_dict)
+        )
         c_bear = self.bearing_cost(var_dict)
         c_sa   = self.sa_cost(sa_results) if sa_results else 0.0
         total  = c_mat + c_mach + c_bear + c_sa

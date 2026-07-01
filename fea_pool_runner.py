@@ -71,6 +71,7 @@ class FEAPoolRunner:
         dry_run: bool = True,
         output_dir: str | Path = "fea_batch_results",
         start_id: int = 1,
+        case_prefix: str = "case",
     ):
         self.X_samples    = X_samples
         self.design_space = design_space
@@ -79,6 +80,7 @@ class FEAPoolRunner:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.results: List[Dict] = []
         self.start_id   = start_id
+        self.case_prefix = (case_prefix or "case").strip() or "case"
 
         self.output_dir = Path("F:/files/rdo_results/fea_cache")
 
@@ -88,6 +90,9 @@ class FEAPoolRunner:
     # ─────────────────────────────────────────────────────────────────────────
     # Public API
     # ─────────────────────────────────────────────────────────────────────────
+    def _case_dir(self, case_id: int) -> Path:
+        return self.output_dir / f"{self.case_prefix}_{case_id:04d}"
+
     def execute_batch(
         self,
         max_failures: int = 10,
@@ -139,6 +144,9 @@ class FEAPoolRunner:
         compliance at each support point.
         """
         v = self.design_space.decode_vector(x)
+
+        case_dir = self._case_dir(case_id)
+        case_dir.mkdir(parents=True, exist_ok=True)
 
         # ── Geometry ──────────────────────────────────────────────────────────
         L1, L2, L3, L4 = v["L1"], v["L2"], v["L3"], v["L4"]
@@ -298,8 +306,10 @@ class FEAPoolRunner:
             modal    = ModalConfig(num_modes=6),
         )
 
-        # ... (نفس الكود بالأعلى)
-        sim = SpindleSimulation(output_dir=str(self.output_dir / f"case_{case_id:04d}"))
+        case_dir = self._case_dir(case_id)
+        case_dir.mkdir(parents=True, exist_ok=True)
+
+        sim = SpindleSimulation(output_dir=str(case_dir))
         sim.start()
         try:
             res = sim.run_case(case)
@@ -307,11 +317,11 @@ class FEAPoolRunner:
             sim.close()
             # --------- التعديل: تنظيف المساحة فوراً بعد انتهاء التحليل ---------
             import glob, os
-            case_dir = str(self.output_dir / f"case_{case_id:04d}")
+            case_dir_str = str(case_dir)
             # تحديد امتدادات ملفات MAPDL الضخمة التي لا نحتاجها بعد استخراج النتائج
             junk_extensions = ["*.rst", "*.db", "*.emat", "*.esav", "*.err", "*.log", "*.page"]
             for ext in junk_extensions:
-                for f in glob.glob(os.path.join(case_dir, ext)):
+                for f in glob.glob(os.path.join(case_dir_str, ext)):
                     try:
                         os.remove(f)
                     except Exception as e:

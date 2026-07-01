@@ -21,6 +21,7 @@
 """
 
 from __future__ import annotations
+import sys
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -541,6 +542,7 @@ class ActiveLearner:
         seed:     int = 0,
         X_test:   Optional[np.ndarray] = None,
         y_test:   Optional[np.ndarray] = None,
+        dry_run:  bool = False,
     ) -> Tuple[np.ndarray, np.ndarray, SurrogateModel, Dict[str, float]]:
         """
         Run one Active Learning round:
@@ -551,10 +553,62 @@ class ActiveLearner:
                AL adds samples in high-uncertainty regions which can hurt
                R² on a held-out test set if those regions contain outliers.
                If the new R² < old R², we keep the data but revert the model.
+
+        Fidelity (dry_run parameter)
+        -----------------------------
+        Default is dry_run=False → full ANSYS MAPDL. Active Learning exists
+        specifically to refine the surrogate in regions where it is least
+        accurate; evaluating those candidates with the fast *approximate*
+        analytical solver (dry_run=True) would train the "refinement" step
+        against the wrong physics, defeating the purpose of AL and — if the
+        main FEA pool was run with ANSYS — silently mixing two fidelity
+        levels into one training set. Set dry_run=True only for offline
+        testing on a machine without ANSYS installed.
         """
+        if not dry_run:
+            # Fail fast with a clear message rather than burning through
+            # max_failures consecutive RuntimeErrors inside execute_batch().
+            mod = sys.modules.get(getattr(fea_runner_cls, "__module__", ""), None)
+            mapdl_available = getattr(mod, "MAPDL_AVAILABLE", True)
+            if not mapdl_available:
+                raise RuntimeError(
+                    "ActiveLearner.run_round(dry_run=False) requires ANSYS "
+                    "MAPDL (PyMAPDL), which is not available on this machine. "
+                    "Either run on a Windows host with ANSYS installed, or "
+                    "pass dry_run=True (master_workflow: --al_dry_run) to use "
+                    "the fast analytical solver instead."
+                )
+
         X_new = self.select_candidates(n_pool=n_pool, n_select=n_select, seed=seed)
-        runner = fea_runner_cls(X_new, self.design_space, dry_run=True)
+        runner = fea_runner_cls(
+            X_new,
+            self.design_space,
+            dry_run=dry_run,
+            case_prefix="active",
+        )
         df_new = runner.execute_batch()
+        
+        # Align X_new with successful cases in df_new
+        # (some cases may fail in execute_batch(), causing a mismatch)
+        var_cols = sorted([c for c in df_new.columns if c.startswith("var_")])
+        if len(df_new) < len(X_new):
+            # Some cases failed; reconstruct X_successful from df_new's var_* columns
+            bounds = self.design_space.get_bounds()  # [[lower, upper], ...]
+            var_names = self.design_space.get_variable_names()
+            X_successful = []
+            for _, row in df_new.iterrows():
+                x_normalized = []
+                for var_name, (lower, upper) in zip(var_names, bounds):
+                    col_name = f"var_{var_name}"
+                    if col_name in row:
+                        physical_value = float(row[col_name])
+                        # Inverse normalization: (physical - lower) / (upper - lower)
+                        x_norm = (physical_value - lower) / (upper - lower)
+                        x_normalized.append(x_norm)
+                if len(x_normalized) == len(var_names):
+                    X_successful.append(x_normalized)
+            X_new = np.array(X_successful) if X_successful else np.empty((0, X_new.shape[1]))
+        
         y_new  = df_new[output_names].values
 
         X_train_new = np.vstack([X_train, X_new])

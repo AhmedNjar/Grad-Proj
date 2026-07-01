@@ -18,7 +18,7 @@
   ──────────────────────────────────────
   Discrete (integer index into grade list):
     it_journal  — IT grade for ALL shaft diameters (R1,R2,R3,R4)
-                  choices: IT4 | IT5 | IT6 | IT7
+                  choices: IT4 | IT5
     it_bore     — IT grade for inner bore (ri)
                   choices: IT6 | IT7 | IT8 | IT9
     it_lengths  — IT grade for ALL axial lengths (L1,L2,L3,L4)
@@ -125,8 +125,8 @@ def it_value_um(grade: str, nominal_mm: float) -> float:
 # IT grade lists (choices per feature group)
 # ─────────────────────────────────────────────────────────────────────────────
 
-JOURNAL_GRADES = ["IT4", "IT5", "IT6", "IT7"]    # for R1,R2,R3,R4
-BORE_GRADES    = ["IT6", "IT7", "IT8", "IT9"]    # for ri
+JOURNAL_GRADES = ["IT4", "IT5"]    # for R1,R2,R3,R4 (shaft journals only)
+BORE_GRADES    = ["IT7", "IT8", "IT9", "IT10"]    # for ri
 LENGTH_GRADES  = ["IT10","IT11","IT12","IT13"]   # for L1,L2,L3,L4
 HOUSING_GRADES = ["IT5", "IT6", "IT7", "IT8"]   # for housing bore (non-rotating outer ring)
                                                   # ISO 15:2017 recommends H6 (IT6) or H7 (IT7)
@@ -451,11 +451,11 @@ class ToleranceOptimizer:
     Multi-objective tolerance optimizer.
 
     Strategy:
-        Enumerate all 4×4×4 = 64 IT-grade combinations.
+        Enumerate all 2×4×4 = 32 IT-grade combinations.
         For each, optimise the 4 continuous variables (pos_tol_front/rear,
         Ra_journal, Ra_bore) using weighted-sum scalarisation over 15 weight
         vectors sampled on the Pareto simplex.
-        Collect all 64×15 = 960 evaluated points.
+        Collect all 32×15 = 480 evaluated points.
         Return Pareto-optimal subset.
 
     This is exact for discrete IT choices and fast (< 15 s total).
@@ -539,7 +539,7 @@ class ToleranceOptimizer:
         all_points: List[TolerancePoint] = []
         weight_vecs = self._weight_vectors()
 
-        # Order: (shaft journal, inner bore, spacer, housing) — 4^4 = 256 combos
+        # Order: (shaft journal, inner bore, spacer, housing) — 2×4×4×4 = 128 combos
         combos = list(product(JOURNAL_GRADES, BORE_GRADES, LENGTH_GRADES, HOUSING_GRADES))
         if verbose:
             print(f"\n  Tolerance Optimizer: {len(combos)} IT combos "
