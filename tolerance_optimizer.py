@@ -1253,9 +1253,9 @@ if __name__ == "__main__":
         m = importlib.util.module_from_spec(spec); sys.modules[name] = m
         spec.loader.exec_module(m); return m
 
-    load("design_variables",    "./01_design_variables.py")
-    load("shaft_runout",        "./09_shaft_runout.py")
-    load("bearing_performance", "./08_bearing_performance.py")
+    load("design_variables",    "design_variables.py")
+    load("shaft_runout",        "shaft_runout.py")
+    load("bearing_performance", "bearing_performance.py")
 
     from design_variables    import DesignSpace, SpindleBearingArrangement
     from shaft_runout        import get_bearing_positions_from_design
